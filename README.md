@@ -54,7 +54,7 @@ There are a number of other notable patterns used within the AppHost, such as Se
 
 The example below shows the bare minimum you need to have to build an AppHost and run an IHostedProcess class.
 
-```
+```csharp
 public class Program
 {
    public static void Main(string[] args)
@@ -114,7 +114,7 @@ All of the above can be done using a Startup class - covered further in the read
 ### Using convention-based Startup 
 Although the ConfigureAppConfig/ConfigureLogging/ConfigureServices are available on the WebHostBuilder and can be called inline, as shown below:
 
-```
+```csharp
 public class Program
 {
    public static void Main(string[] args)
@@ -149,7 +149,7 @@ lots of complex dependencies to wire up and want to do this in one place.  Keepi
 instead:
 
 
-```
+```csharp
 public class Program
 {
    public static void Main(string[] args)
@@ -172,7 +172,7 @@ public class Program
 ```
 Where Startup class is defined as follows:
 
-```
+```csharp
 public class Startup
 {
     public void ConfigureAppConfiguration(IConfigurationBuilder builder)
@@ -198,7 +198,7 @@ This keeps Program/Main neat and only about config.  To utilise a Startup class 
 
 The interface that needs to be implemented by classes which will use the ProcessHost service is defined as follows:
 
-```
+```csharp
 public interface IHostedProcess
 {
     void Start(AppHostContext context, CancellationToken cancellationToken);
@@ -208,6 +208,7 @@ public interface IHostedProcess
 ```
 An example of an implementing IHostedProcess class would be the following:
 
+```csharp
     // Example process that implements IHostedProcess.
     public class MySampleProcess : IHostedProcess
     {
@@ -232,18 +233,19 @@ An example of an implementing IHostedProcess class would be the following:
             Console.WriteLine($"An error happened: {ex.Message}");
         }
     }
+```
 
 Now this class is ready to be hosted!  Add your hosted processes to AppHostBuilder - you can add multiple hosted processes (they will be started in the order they are added).
 
 ### Starting your AppHost
 When you've built an AppHost, you can start it in two modes.  RunAndBlock or RunOnce, shown below:
 
-```
+```csharp
 // Run once and stay active - useful in multithreaded applications, such as ServiceBus apps.
 processHost.RunAndBlock();
 ```
 
-```
+```csharp
 // Run once then complete - useful for Jobs that run through and then stop.
 processHost.RunOnce();
 ```
