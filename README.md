@@ -1,8 +1,9 @@
-# **Cloud.Core.AppHost** 
+# **Cloud.Core.AppHost** [![Build status](https://dev.azure.com/cloudcoreproject/CloudCore/_apis/build/status/Cloud.Core/Cloud.Core.AppHost_Package)](https://dev.azure.com/cloudcoreproject/CloudCore/_build/latest?definitionId=7) ![Code Coverage](https://cloud1core.blob.core.windows.net/codecoveragebadges/Cloud.Core.AppHost-LineCoverage.png) [![Cloud.Core.Configuration package in Cloud.Core feed in Azure Artifacts](https://feeds.dev.azure.com/cloudcoreproject/dfc5e3d0-a562-46fe-8070-7901ac8e64a0/_apis/public/Packaging/Feeds/8949198b-5c74-42af-9d30-e8c462acada6/Packages/4a4d803b-f864-4da1-8060-6af8efb0e3e6/Badge)](https://dev.azure.com/cloudcoreproject/CloudCore/_packaging?_a=package&feed=8949198b-5c74-42af-9d30-e8c462acada6&package=4a4d803b-f864-4da1-8060-6af8efb0e3e6&preferRelease=true) 
+
 
 <div id="description">
 
-Common functionality for hosting process execution in a standard way on Windows or Linux (as well as within a container).
+Common functionality for hosting process execution in a standard way on Windows or Linux as an app or service (as well as within a container).
 
 This package contains classes to host implementing interfaces to catch unhandled exception handling and carry out various self-healing 
 configuration, like rerunning failed processes. 
@@ -148,7 +149,6 @@ Instead of configuring inline, a Startup class can also be used.  This is called
 lots of complex dependencies to wire up and want to do this in one place.  Keeping the Program class just for config and without logic.  Using the example above, this is what we'd have 
 instead:
 
-
 ```csharp
 public class Program
 {
@@ -177,18 +177,18 @@ public class Startup
 {
     public void ConfigureAppConfiguration(IConfigurationBuilder builder)
     {
-	builder.UseKubernetesContainerConfig();
+	    builder.UseDefaultConfig();
     }
 
     public void ConfigureLogging(IConfiguration config, ILoggingBuilder builder)
     {
-	builder.AddConfiguration(config.GetSection("Logging"));
-	builder.AddConsole();
+	    builder.AddConfiguration(config.GetSection("Logging"));
+	    builder.AddConsole();
     }
 
     public void ConfigureServices(IConfiguration config, ILogger logger, IServiceCollection services)
     {
-	serviceBuilder.AddSingleton<SomeService>();
+	    serviceBuilder.AddSingleton<SomeService>();
     }
 }
 ```
@@ -208,7 +208,6 @@ public interface IHostedProcess
 ```
 An example of an implementing IHostedProcess class would be the following:
 
-```csharp
     // Example process that implements IHostedProcess.
     public class MySampleProcess : IHostedProcess
     {
@@ -233,7 +232,6 @@ An example of an implementing IHostedProcess class would be the following:
             Console.WriteLine($"An error happened: {ex.Message}");
         }
     }
-```
 
 Now this class is ready to be hosted!  Add your hosted processes to AppHostBuilder - you can add multiple hosted processes (they will be started in the order they are added).
 
@@ -252,11 +250,11 @@ processHost.RunOnce();
 
 ## Project Template
 You can find an AI Project template that has a default implementation of AppHost here:
-TBC
+https://dev.azure.com/cloudcoreproject/CloudCore/_wiki/wikis/CloudCore.wiki?pagePath=%2FHome%2FCloud.Core%20Templates
 
 ## Test Coverage
-A threshold will be added to this package to ensure the test coverage is above 75% for branches, functions and lines.  If it's not above the required threshold 
-(threshold that will be implemented on ALL of the new core repositories going forward), then the build will fail.
+A threshold will be added to this package to ensure the test coverage is above 80% for branches, functions and lines.  If it's not above the required threshold 
+(threshold that will be implemented on ALL of the core repositories to gurantee a satisfactory level of testing), then the build will fail.
 
 ## Compatibility
 This package has has been written in .net Standard and can be therefore be referenced from a .net Core or .net Framework application. The advantage of utilising from a .net Core application, 
@@ -264,14 +262,17 @@ is that it can be deployed and run on a number of host operating systems, such a
 Windows (or Linux using Mono).
  
 ## Setup
-This package requires the .net Core 2.1 SDK, it can be downloaded here: 
-https://www.microsoft.com/net/download/dotnet-core/2.1
+This package is built using .net Standard 2.1 and requires the .net Core 3.1 SDK, it can be downloaded here: 
+https://www.microsoft.com/net/download/dotnet-core/
 
 IDE of Visual Studio or Visual Studio Code, can be downloaded here:
 https://visualstudio.microsoft.com/downloads/
 
 ## How to access this package
-All of the AI.Core.* packages are published to our internal NuGet feed.  To consume this on your local development machine, please add the following feed to your feed sources in Visual Studio:
-TBC
-
+All of the Cloud.Core.* packages are published to a internal NuGet feed.  To consume this on your local development machine, please add the following feed to your feed sources in Visual Studio:
+https://pkgs.dev.azure.com/cloudcoreproject/CloudCore/_packaging/Cloud.Core/nuget/v3/index.json
+ 
 For help setting up, follow this article: https://docs.microsoft.com/en-us/vsts/package/nuget/consume?view=vsts
+
+
+<img src="https://cloud1core.blob.core.windows.net/icons/cloud_core_small.PNG" />

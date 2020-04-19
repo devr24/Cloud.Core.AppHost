@@ -13,15 +13,15 @@ using FluentAssertions;
 using Xunit;
 using Cloud.Core.Testing;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.Configuration.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Cloud.Core.AppHost.Tests
 {
+    [IsUnit]
     public class ApplicationHostTest
     {
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_MultipleBuild()
         {
             var builder = new AppHostBuilder(true).CreateDefaultBuilder()
@@ -34,12 +34,12 @@ namespace Cloud.Core.AppHost.Tests
                 });
             builder.Build();
             builder.Config.GetValue<string>("a").Should().Be("b");
-            
+
             // Should fail the rebuild method.
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_ErrorStopping()
         {
             var builder = new AppHostBuilder().CreateDefaultBuilder();
@@ -49,7 +49,7 @@ namespace Cloud.Core.AppHost.Tests
             host.RunOnce();
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_WithNoRetryPolicies()
         {
             var builder = new AppHostBuilder();
@@ -59,7 +59,7 @@ namespace Cloud.Core.AppHost.Tests
             host.RunOnce();
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_BackgroundOperation()
         {
             var hostedService = new SimpleService2();
@@ -74,15 +74,28 @@ namespace Cloud.Core.AppHost.Tests
                 context.IsBackgroundMonitorRunning.Should().BeTrue();
                 context.SystemInfo.Should().NotBe(null);
 
-                var host = ((AppHost) appHost);
+                var host = ((AppHost)appHost);
                 host._cancellation.Dispose();
                 host.ProcessingStop();
             };
 
-            appHost.RunAndBlock();
+            appHost.RunOnce();
         }
 
-        [Fact, IsUnit]
+        [Fact]
+        public void Test_ApplicationHost_BackgroundMonitor()
+        {
+            var hostContext = new AppHostContext(30, new SystemInfo(), null);
+
+            hostContext.StopMonitor();
+            hostContext.StartMonitor();
+            hostContext.StartMonitor();
+            hostContext.StopMonitor();
+
+            hostContext.IsBackgroundMonitorRunning.Should().Be(false);
+        }
+
+        [Fact]
         public void Test_ApplicationHost_BackgroundOperationInvalid()
         {
             var hostedService = new SimpleService2();
@@ -91,17 +104,16 @@ namespace Cloud.Core.AppHost.Tests
                 .AddHostedProcess(hostedService));
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_HealthProbe()
         {
-            var processHost = new AppHostBuilder(true)
+            var builder = new AppHostBuilder(true)
                 .ConfigureAppConfiguration(config =>
                     {
                         config.AddInMemoryCollection(new List<KeyValuePair<string, string>>()
                         {
                             new KeyValuePair<string, string>("Key1", "Val1")
                         });
-
 
                         // Do "global" initialization here; Only called once.
                         var currentDir = Directory.GetCurrentDirectory();
@@ -134,24 +146,24 @@ namespace Cloud.Core.AppHost.Tests
                 .AddHttpClient("test", "http://localhost:882/")
                 .AddHealthProbe("882")
                 .AddHostedProcess<SimpleService>()
-                .AddHostedProcess<SimpleService1>()
-                .Build();
+                .AddHostedProcess<SimpleService1>();
 
-            var httpClient = ((AppHost) processHost)._serviceProvider.GetService<IHttpClientFactory>();
-            
+            var processHost = builder.Build();
+
+            var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>();
+
             var res = httpClient.CreateClient("test").GetAsync("probe").GetAwaiter().GetResult();
             res.StatusCode.Should().Be(200);
 
-            processHost.RunOnce();
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_ServiceEndPoint()
         {
             var builder = new AppHostBuilder()
                 .ConfigureServices((config, logger, services) => { services.AddSingleton<SampleDependency>(); })
-                .AddHttpClient("test", "http://localhost:882/")
-                .AddHealthProbe("882")
+                .AddHttpClient("test", "http://localhost:889/")
+                .AddHealthProbe("889")
                 .AddHostedProcess<SimpleService>()
                 .AddHostedProcess<SimpleService1>()
                 .AddHostedProcess<SimpleService2>()
@@ -161,25 +173,69 @@ namespace Cloud.Core.AppHost.Tests
             builder._processTypes.Add(typeof(SimpleService3));
 
             var processHost = builder.Build();
-            var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>().CreateClient("test");
+            var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>()
+                .CreateClient("test");
 
             httpClient.GetAsync("probe").GetAwaiter().GetResult().StatusCode.Should().Be(200);
             httpClient.GetAsync(typeof(SimpleService).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
             httpClient.GetAsync(typeof(SimpleService1).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
             httpClient.GetAsync(typeof(SimpleService2).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
-            httpClient.GetAsync(typeof(SimpleService3).Name).GetAwaiter().GetResult().StatusCode.Should().Be(500);
+            httpClient.GetAsync(typeof(SimpleService3).Name).GetAwaiter().GetResult().StatusCode.Should().Be(404);
+            httpClient.GetAsync("swagger").GetAwaiter().GetResult().StatusCode.Should().Be(200);
 
-            ((AppHost)processHost).ProcessingStop();
+            StopHost((AppHost)processHost).ConfigureAwait(false);
+
+            processHost.RunAndBlock();
+
+            builder = new AppHostBuilder().CreateDefaultBuilder()
+                .ConfigureServices((config, logger, services) => { services.AddSingleton<SampleDependency>(); })
+                .AddHostedProcess<SimpleService>().UseHostedProcessEndpoints();
+            builder.Build().RunOnce();
         }
-        
-        [Fact, IsUnit]
+
+        private async Task StopHost(AppHost processHost)
+        {
+            var task = Task.Delay(1000);
+            await task;
+            processHost.ProcessingStop();
+        }
+
+        [Fact]
+        public void Test_ApplicationHost_LogSystemInfo()
+        {
+            var builder = new AppHostBuilder()
+                .ConfigureServices((config, logger, services) => services.AddSingleton<SampleDependency>().AddHostedProcess<SimpleService>())
+                .UseHostedProcessEndpoints();
+
+            var processHost = builder.Build();
+
+            var appHost = new AppHost(((AppHost)processHost)._webHost,
+                ((AppHost)processHost)._retryPolicies,
+                ((AppHost)processHost)._serviceProvider,
+                new List<Type>(), -1, true);
+
+            appHost.RunOnce();
+
+            appHost.Status.Should().Be(HostStatus.Stopped);
+
+            appHost = new AppHost(((AppHost)processHost)._webHost,
+                ((AppHost)processHost)._retryPolicies,
+                new ServiceCollection().BuildServiceProvider(),
+                new List<Type>(), -1, true);
+
+            appHost.RunOnce();
+
+            appHost.Status.Should().Be(HostStatus.Stopped);
+        }
+
+        [Fact]
         public void Test_ApplicationHost_DefaultBuilder()
         {
             var processHost = new AppHostBuilder().CreateDefaultBuilder().AddHealthProbe("889")
                 .AddHttpClient("test", "http://localhost:889/").AddHostedProcess(new HttpErrorService()).Build();
 
-            var memoryCache = ((AppHost) processHost)._serviceProvider.GetService<IMemoryCache>();
-            var httpClient = ((AppHost) processHost)._serviceProvider.GetService<IHttpClientFactory>();
+            var memoryCache = ((AppHost)processHost)._serviceProvider.GetService<IMemoryCache>();
+            var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>();
 
             memoryCache.Should().NotBe(null);
             httpClient.Should().NotBe(null);
@@ -188,7 +244,7 @@ namespace Cloud.Core.AppHost.Tests
             res.StatusCode.Should().Be(200);
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_PollyRetry()
         {
             var builder = new AppHostBuilder(true);
@@ -211,13 +267,15 @@ namespace Cloud.Core.AppHost.Tests
                 .Build(); // Build the host - this wires up dependencies.
 
             var service = ((AppHost)processHost)._serviceProvider.GetService<HttpErrorService>();
-            
-            processHost.RunAndBlock();
+
+            processHost.RunOnce();
+
+            //Thread.Sleep(3000);
 
             service.CallCount.Should().Be(3);
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_HttpClientSingle()
         {
             var builder = new AppHostBuilder();
@@ -225,7 +283,8 @@ namespace Cloud.Core.AppHost.Tests
             // Configure the application host.
             var processHost = builder
                 .AddHealthProbe("884")
-                .AddHttpClient("test", "http://localhost:884", 2, 2)
+                .AddHttpClient("test", "http://localhost:884")
+                .ConfigureServices((config, logger, serviceBuilder) => serviceBuilder.AddHostedProcess(new SimpleService(new SampleDependency())))
                 .AddHostedProcess<SimpleService1>()
                 .Build();
 
@@ -244,7 +303,7 @@ namespace Cloud.Core.AppHost.Tests
             }
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_HttpClientMultiple()
         {
             var builder = new AppHostBuilder();
@@ -257,7 +316,7 @@ namespace Cloud.Core.AppHost.Tests
                         { "test1", new Uri("http://localhost:886") },
                         { "test2", new Uri("http://test2.com") },
                         { "test3", new Uri("http://test3.com") }
-                }, 2, 2)
+                })
                 .AddHostedProcess<SimpleService1>()
                 .Build();
 
@@ -269,13 +328,14 @@ namespace Cloud.Core.AppHost.Tests
 
             try
             {
-                client.GetAsync("doesnotexist").GetAwaiter().GetResult(); }
+                client.GetAsync("doesnotexist").GetAwaiter().GetResult();
+            }
             catch (Exception)
             {
             }
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_HttpClientTyped()
         {
             var builder = new AppHostBuilder();
@@ -283,7 +343,7 @@ namespace Cloud.Core.AppHost.Tests
             // Configure the application host.
             var processHost = builder
                 .AddHealthProbe("885")
-                .AddHttpClientTyped<HttpClientDependencyTest>("test", "http://a.com:885", 2, 2)
+                .AddHttpClientTyped<HttpClientDependencyTest>("test", "http://a.com:885")
                 .AddHostedProcess<SimpleService1>()
                 .Build();
 
@@ -292,13 +352,14 @@ namespace Cloud.Core.AppHost.Tests
             Assert.NotNull(httpClient);
             try
             {
-                httpClient.RetryExample(); }
+                httpClient.RetryExample();
+            }
             catch (Exception)
             {
             }
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_Startup()
         {
             var builder = new AppHostBuilder().CreateDefaultBuilder();
@@ -308,25 +369,32 @@ namespace Cloud.Core.AppHost.Tests
             instanceBuilder.UseStartup(typeof(FakeStartup)).Build().RunOnce();
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_Startup_ErrorConfigBuild()
         {
             var builder = new AppHostBuilder().CreateDefaultBuilder();
             Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupConfig>().Build());
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_Startup_ErrorLoggingBuild()
         {
             var builder = new AppHostBuilder().CreateDefaultBuilder();
             Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupLogging>().Build());
         }
 
-        [Fact, IsUnit]
+        [Fact]
         public void Test_ApplicationHost_Startup_ErrorServiceBuild()
         {
             var builder = new AppHostBuilder().CreateDefaultBuilder();
             Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupServices>().Build());
+        }
+
+        [Fact]
+        public void Test_WebClientExtension_GetExternalIPAddress()
+        {
+            var externalIP = WebClientExtensions.GetExternalIPAddress();
+            externalIP.Should().NotBe(null);
         }
     }
 
@@ -373,7 +441,7 @@ namespace Cloud.Core.AppHost.Tests
             config.GetChildren().Count().Should().BeGreaterThan(0);
         }
     }
-    
+
     internal class SampleDependency
     {
         public bool Test()
@@ -395,6 +463,8 @@ namespace Cloud.Core.AppHost.Tests
                 Debug.Write(context.ApplicationRunDuration);
                 StopProcessing?.Invoke(context);
             };
+
+            await Task.FromResult(true);
         }
     }
 
@@ -434,7 +504,7 @@ namespace Cloud.Core.AppHost.Tests
     internal class ErrorStopping : IHostedProcess
     {
         public void Error(Exception ex, ErrorArgs args) { }
-        public async Task Start(AppHostContext context, CancellationToken cancellationToken) { }
+        public async Task Start(AppHostContext context, CancellationToken cancellationToken) { await Task.FromResult(true); }
 
         public void Stop()
         {

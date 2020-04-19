@@ -41,11 +41,19 @@ namespace Cloud.Core.AppHost
     /// <seealso cref="System.IDisposable" />
     internal class AppHost : IAppHost
     {
+        private readonly bool _showSystemInfo;
         internal readonly CancellationTokenSource _cancellation = new CancellationTokenSource();
         internal readonly ManualResetEventSlim _keepAliveEvent = new ManualResetEventSlim();
         internal readonly object _lockGate = new object();
         internal bool _stopped;
+        private bool _usingServiceEndpoints;
         internal readonly int _monitorFrequency;
+        internal readonly List<AsyncPolicy> _retryPolicies;
+        internal readonly IWebHost _webHost;
+        internal readonly ServiceProvider _serviceProvider;
+        internal readonly ILogger _logger;
+        internal readonly IEnumerable<Type> _hostedProcessTypes;
+        internal readonly AppHostContext Context;
 
         /// <summary>
         /// Gets the status.
@@ -53,12 +61,11 @@ namespace Cloud.Core.AppHost
         /// <value>The status.</value>
         public HostStatus Status { get; internal set; } = HostStatus.Starting;
 
-        internal readonly List<Policy> _retryPolicies;
-        internal readonly IWebHost _webHost;
-        internal readonly ServiceProvider _serviceProvider;
-        internal readonly ILogger _logger;
-        internal readonly IEnumerable<Type> _hostedProcessTypes;
-        internal readonly AppHostContext Context;
+        /// <summary>
+        /// Gets the system information.
+        /// </summary>
+        /// <value>The system information.</value>
+        public SystemInfo HostSystemInfo { get; } = new SystemInfo();
 
         /// <summary>
         /// Initializes a new instance of the AppHost class.
@@ -68,8 +75,10 @@ namespace Cloud.Core.AppHost
         /// <param name="serviceProvider">The service provider.</param>
         /// <param name="hostedProcessTypes">The hosted process types.</param>
         /// <param name="monitorFrequency">The monitor frequency.</param>
+        /// <param name="showSystemInfo">if set to <c>true</c> [show system information].  Typically set to false when web host builder is used.</param>
+        /// <param name="usingServiceEndpoints">if set to <c>true</c> [using service endpoints].</param>
         [ExcludeFromCodeCoverage]
-        public AppHost(IWebHost webHost, List<Policy> retryPolicies, ServiceProvider serviceProvider, IEnumerable<Type> hostedProcessTypes, int monitorFrequency = -1)
+        internal AppHost(IWebHost webHost, List<AsyncPolicy> retryPolicies, ServiceProvider serviceProvider, IEnumerable<Type> hostedProcessTypes, int monitorFrequency = -1, bool showSystemInfo = false, bool usingServiceEndpoints = false)
         {
             _webHost = webHost;
             _retryPolicies = retryPolicies;
@@ -77,19 +86,16 @@ namespace Cloud.Core.AppHost
             _logger = serviceProvider.GetService<ILogger<AppHost>>();
             _hostedProcessTypes = hostedProcessTypes;
             _monitorFrequency = monitorFrequency;
-            Context = new AppHostContext(_monitorFrequency, SystemInfo, _logger);
+            _showSystemInfo = showSystemInfo;
+            _usingServiceEndpoints = usingServiceEndpoints;
+
+            Context = new AppHostContext(_monitorFrequency, HostSystemInfo, _logger);
 
             // Attach to domain wide exceptions.
             AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) => _logger?.LogError($"Unhandled exception captured: {eventArgs.ExceptionObject.ToString()}");
             AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) => { _logger?.LogWarning("Application exit captured"); ProcessingStop(); };
             Console.CancelKeyPress += (sender, eventArgs) => { _logger?.LogWarning("Application cancel keys triggered"); eventArgs.Cancel = true; ProcessingStop(); };
         }
-
-        /// <summary>
-        /// Gets the system information.
-        /// </summary>
-        /// <value>The system information.</value>
-        public SystemInfo SystemInfo { get; } = new SystemInfo();
 
         /// <summary>
         /// Runs the specified process.
@@ -102,38 +108,70 @@ namespace Cloud.Core.AppHost
                 Context.StartMonitor();
 
             _logger?.LogInformation("Running app host");
-            _logger?.LogInformation($"SystemInfo: {SystemInfo}");
-            Status = HostStatus.Starting;
+
+            if (_showSystemInfo)
+                _logger?.LogInformation($"SystemInfo: {HostSystemInfo}");
+
+            Status = HostStatus.Running;
 
             if (_hostedProcessTypes != null && _hostedProcessTypes.Any())
             {
-                foreach (Type processType in _hostedProcessTypes)
+                if (!_usingServiceEndpoints)
                 {
-                    var hostedProcess = _serviceProvider.GetService(processType) as IHostedProcess;
-
-                    _logger?.LogInformation($"Starting hosted process {processType.Name}");
-                    // Run the hosted process, wrapped in polly retry logic.
-                    BuildWrappedPolicy().ExecuteAsync(token => hostedProcess?.Start(Context, _cancellation.Token), _cancellation.Token)
-                        .ContinueWith(p =>
-                        {
-                            if (p.IsFaulted || p.Status == TaskStatus.Canceled)
-                            {
-                                _logger?.LogError($"Error running hosted process {processType.Name} execution ");
-                                ProcessError(hostedProcess, p.Exception);
-                            }
-                            else if (p.IsCompleted && runOnce)
-                                ProcessingStop();
-                        })
-                        .ConfigureAwait(runOnce);
+                    RunHostedProcesses(runOnce);
                 }
+                else
+                    _logger?.LogWarning("Running as service endpoints, processes can only be trigged over http");
 
-                Status = HostStatus.Running;
-                _keepAliveEvent.Wait();
+
+                if (!runOnce)
+                    _keepAliveEvent.Wait();
             }
             else
-                _logger?.LogWarning("No hosted processes found");
-            
+            {
+                _logger?.LogWarning("No hosted processes found" +
+                    (runOnce ? " - cannot run and block without a hosted process to execute" : string.Empty));
+            }
+
+            // Stop all processing when the code reaches here.
+            ProcessingStop();
         }
+
+        /// <summary>
+        /// Run each of the hosted processes one at a time.
+        /// </summary>
+        /// <param name="runOnce">if set to <c>true</c> [run once].</param>
+        private void RunHostedProcesses(bool runOnce)
+        {
+            var finishedProcesses = 0;
+            var processTypeCount = _hostedProcessTypes.Count();
+
+            foreach (var processType in _hostedProcessTypes)
+            {
+                var hostedProcess = _serviceProvider.GetService(processType) as IHostedProcess;
+
+                _logger?.LogInformation($"Starting hosted process {processType.Name}");
+
+                // Run the hosted process, wrapped in polly retry logic.
+                BuildWrappedPolicy().ExecuteAsync(token => hostedProcess?.Start(Context, _cancellation.Token), _cancellation.Token)
+                    .ContinueWith(p =>
+                    {
+                        if (p.IsFaulted || p.Status == TaskStatus.Canceled)
+                        {
+                            _logger?.LogError($"Error running hosted process {processType.Name} execution {p.Exception?.Message}");
+                            ProcessError(hostedProcess, p.Exception, !runOnce);
+                        }
+
+                        finishedProcesses++;
+                    })
+                    .ConfigureAwait(runOnce);
+
+            }
+            // During run once - we want to ensure all polly retry mechanisms have been executed.  This method will ensure this happens.
+            while (runOnce && finishedProcesses != processTypeCount)
+                Thread.Sleep(500); // wait for retry policies to finish.
+        }
+
 
         /// <summary>
         /// Processes stop will call the hosted process's Stop method and waiting for the result.
@@ -201,9 +239,9 @@ namespace Cloud.Core.AppHost
             // Lock statement as this method can be accessed from both threads.
             lock (_lockGate)
             {
-                _logger?.LogError($"Application host has caught an error {hostedProcess?.GetType().Name}: {e.Message}");
+                _logger?.LogError($"Application host has caught an error {hostedProcess?.GetType().Name}: {e?.Message}");
 
-                var args = new ErrorArgs {ContinueClose = forceStop};
+                var args = new ErrorArgs { ContinueClose = forceStop };
 
                 try
                 {
@@ -227,7 +265,7 @@ namespace Cloud.Core.AppHost
         /// Builds the wrapped retry polly policy.
         /// </summary>
         /// <returns><see cref="PolicyWrap" /> wrapped policy that has been built.</returns>
-        internal Policy BuildWrappedPolicy()
+        internal AsyncPolicy BuildWrappedPolicy()
         {
             // If we have more than one policy, then wrap them together.
             switch (_retryPolicies.Count)
@@ -261,6 +299,11 @@ namespace Cloud.Core.AppHost
         /// </summary>
         public void RunOnce()
         {
+            if (_usingServiceEndpoints)
+            {
+                _logger.LogWarning("Indicated intended as service endpoints (deferred execution) but executed with RunOnce. Disabled endpoints, processes will run one time at startup instead");
+                _usingServiceEndpoints = false;
+            }
             Run(true);
         }
     }

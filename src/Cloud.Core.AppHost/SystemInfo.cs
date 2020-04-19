@@ -78,7 +78,7 @@
             Hostname = Environment.MachineName;
             Username = Environment.UserName;
             AppName = AppDomain.CurrentDomain.FriendlyName;
-            AppVersion = Assembly.GetEntryAssembly().GetName().Version.ToString();
+            AppVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString();
         }
 
         /// <summary>

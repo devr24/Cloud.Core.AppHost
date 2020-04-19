@@ -55,7 +55,7 @@
             // If providers have been configured, then build the flattened list of settings.
             if (rootConfig is ConfigurationRoot configRoot && configRoot.Providers != null)
             {
-                foreach (IConfigurationProvider provider in configRoot.Providers.Where(p => providersToSkip == null || !providersToSkip.Contains(p.GetType())))
+                foreach (var provider in configRoot.Providers.Where(p => providersToSkip == null || !providersToSkip.Contains(p.GetType())))
                 {
                     var settingKeys = GetKeyNames(new List<string>(), provider, null);
 
@@ -89,29 +89,43 @@
             foreach (var key in distinctKeys)
             {
                 // Full path of key.
-                var newPath = (string.IsNullOrEmpty(path) ? null : path) +
-                           (!string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(key) ? ":" : null) +
-                           (string.IsNullOrEmpty(key) ? null : key);
+                var fullPath = GetFullKeyPath(path, key);
 
                 // If there are children of this config node, then recursively call this method again, otherwise add to key path.
-                var hasChildren = provider.GetChildKeys(new List<string>(), newPath).Any();
+                var hasChildren = provider.GetChildKeys(new List<string>(), fullPath).Any();
+
                 if (hasChildren)
                 {
-                    if (!keyList.Contains(newPath)) // Ensure keys are unique before adding new key.
-                    {
-                        var kvConfigs = GetKeyNames(keyList, provider, newPath);
-                        foreach (var kv in kvConfigs)
-                        {
-                            if (keyList.Contains(kv) == false)
-                                keyList.Add(kv);
-                        }
-                    }
+                    AddChildKeys(keyList, provider, fullPath);
                 }
                 else
-                    keyList.Add(newPath);
+                {
+                    keyList.Add(fullPath);
+                }
             }
 
             return keyList;
+        }
+
+        private static void AddChildKeys(List<string> keyList, IConfigurationProvider provider, string path)
+        {
+            // Ensure keys are unique before adding new key.
+            if (!keyList.Contains(path))
+            {
+                var kvConfigs = GetKeyNames(keyList, provider, path);
+                foreach (var kv in kvConfigs)
+                {
+                    if (!keyList.Contains(kv))
+                        keyList.Add(kv);
+                }
+            }
+        }
+
+        private static string GetFullKeyPath(string path, string key)
+        {
+            return (string.IsNullOrEmpty(path) ? null : path) +
+                           (!string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(key) ? ":" : null) +
+                           (string.IsNullOrEmpty(key) ? null : key);
         }
     }
 }

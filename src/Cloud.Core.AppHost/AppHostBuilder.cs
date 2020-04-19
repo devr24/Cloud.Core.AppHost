@@ -23,7 +23,7 @@
         private bool _hasBuilt;
         private readonly bool _outputConfigInfo;
         private readonly IServiceCollection _services = new ServiceCollection();
-        internal readonly List<Policy> _retryPolicies = new List<Policy>();
+        internal readonly List<AsyncPolicy> _retryPolicies = new List<AsyncPolicy>();
         internal readonly List<Type> _processTypes = new List<Type>();
         internal IConfiguration _config;
         internal IWebHostBuilder _webBuilder = WebHost.CreateDefaultBuilder(null);
@@ -40,7 +40,8 @@
 
         public IConfiguration Config => _config;
         public string BaseUrl => $"http://0.0.0.0:{_webPort}/";
-        
+        public SystemInfo HostSystemInfo { get; } = new SystemInfo();
+
         /// <summary>
         /// Initializes a new instance of the <see cref="AppHostBuilder"/> class.
         /// </summary>
@@ -72,7 +73,7 @@
 
             return this;
         }
-        
+
         /// <summary>Configures the application configuration.</summary>
         /// <param name="configure">The configure.</param>
         /// <returns>AppHostBuilder.</returns>
@@ -108,6 +109,7 @@
         {
             try
             {
+                InternalLogger.LogInformation($"SystemInfo: {HostSystemInfo}");
                 configureServices(_config ?? new ConfigurationBuilder().Build(), InternalLogger, _services);
             }
             catch (Exception e)
@@ -117,7 +119,7 @@
             }
             return this;
         }
-        
+
         /// <summary>
         /// Adds the polly retry policy for the given type.
         /// </summary>
@@ -126,14 +128,15 @@
         /// <param name="retryAttempts">The retry attempts.</param>
         /// <returns>AppHostBuilder.</returns>
         public AppHostBuilder AddRetryWaitPolicy<T>(int waitTimeInSeconds = 5, int retryAttempts = 3)
-            where T: Exception
+            where T : Exception
         {
 
             // Setup the polly policy that will be added to the executing code.
             var policy = Policy.Handle<T>().WaitAndRetryAsync(
-                retryCount: retryAttempts, 
-                sleepDurationProvider: attempt => TimeSpan.FromSeconds(waitTimeInSeconds), 
-                onRetry: (exception, calculatedWaitDuration) => 
+                retryCount: retryAttempts,
+                sleepDurationProvider: attempt => TimeSpan.FromSeconds(waitTimeInSeconds),
+
+                onRetry: (exception, calculatedWaitDuration) =>
                 {
                     _appHost._logger.LogError($"An exception has been caught by retry/wait policy: {exception.Message}");
                     _appHost._logger.LogWarning($"Retry policy executed for type {typeof(T).Name}");
@@ -166,11 +169,11 @@
         /// <param name="tickTimeInSeconds">The tick time in seconds.</param>
         /// <returns>AppHostBuilder.</returns>
         /// <exception cref="ArgumentException">Tick time must be greater than zero</exception>
-         public AppHostBuilder UseBackgroundMonitor(int tickTimeInSeconds)
+        public AppHostBuilder UseBackgroundMonitor(int tickTimeInSeconds)
         {
             if (tickTimeInSeconds < 1)
                 throw new ArgumentException("Tick time must be greater than zero");
-            
+
             _backgroundMonitor = tickTimeInSeconds;
 
             return this;
@@ -204,9 +207,9 @@
         /// Adds the _appHosted process.
         /// </summary>
         /// <returns>Application _appHost with a _appHosted process attached.</returns>
-        public AppHostBuilder AddHostedProcess<T>() where T: IHostedProcess
+        public AppHostBuilder AddHostedProcess<T>() where T : IHostedProcess
         {
-            Type type = typeof(T);
+            var type = typeof(T);
             _services.AddSingleton(type);
             _processTypes.Add(type);
             return this;
@@ -229,22 +232,10 @@
         /// </summary>
         /// <param name="name">The name of the http context.</param>
         /// <param name="baseUrlAddress">The base URL address for the http client.</param>
-        /// <param name="retryAttempts">Number of retries for polly wrapper.</param>
-        /// <param name="waitTimeInSeconds">Wait time before retrying.</param>
         /// <returns>ApplicationHost with the http client factory added to services.</returns>
-        public AppHostBuilder AddHttpClient(string name, string baseUrlAddress, int retryAttempts = 3, int waitTimeInSeconds = 5)
+        public AppHostBuilder AddHttpClient(string name, string baseUrlAddress)
         {
-            _services.AddHttpClient(name, client => client.BaseAddress = new Uri(baseUrlAddress))
-                .AddTransientHttpErrorPolicy(policy =>
-                    policy.WaitAndRetryAsync(
-                        retryCount: retryAttempts,
-                        sleepDurationProvider: attempt => TimeSpan.FromSeconds(waitTimeInSeconds),
-                        onRetry: (ex, calculatedWaitDuration) =>
-                        {
-                            _appHost._logger.LogError($"Unsuccessful http response caught by retry/wait policy: {ex.Result.StatusCode.ToString()}");
-                            _appHost._logger.LogWarning($"Retry policy executed for type {typeof(IHttpClientFactory).Name}");
-                        }));
-
+            _services.AddHttpClient(name, client => client.BaseAddress = new Uri(baseUrlAddress));
             return this;
         }
 
@@ -252,23 +243,12 @@
         /// Adds an HTTP client factory for each name/address requested.
         /// </summary>
         /// <param name="baseAddresses">The name/base addresses, to add.</param>
-        /// <param name="retryAttempts">Number of retries for polly wrapper.</param>
-        /// <param name="waitTimeInSeconds">Wait time before retrying.</param>
         /// <returns>ApplicationHost with new web clients added.</returns>
-        public AppHostBuilder AddHttpClient(Dictionary<string, Uri> baseAddresses, int retryAttempts = 3, int waitTimeInSeconds = 5)
+        public AppHostBuilder AddHttpClient(Dictionary<string, Uri> baseAddresses)
         {
             foreach (var baseAddress in baseAddresses)
             {
-                _services.AddHttpClient(baseAddress.Key, client => client.BaseAddress = baseAddress.Value)
-                    .AddTransientHttpErrorPolicy(policy =>
-                        policy.WaitAndRetryAsync(
-                            retryCount: retryAttempts,
-                            sleepDurationProvider: attempt => TimeSpan.FromSeconds(waitTimeInSeconds),
-                            onRetry: (ex, calculatedWaitDuration) =>
-                            {
-                                _appHost._logger.LogError($"An exception has been caught by retry/wait policy: {ex.Exception.Message}");
-                                _appHost._logger.LogWarning($"Retry policy executed for type {typeof(HttpClient).Name}");
-                            }));
+                _services.AddHttpClient(baseAddress.Key, client => client.BaseAddress = baseAddress.Value);
             }
 
             return this;
@@ -280,28 +260,19 @@
         /// <typeparam name="T">Type of class to add.</typeparam>
         /// <param name="name">The name of this context.</param>
         /// <param name="baseUrlAddress">The base URL address.</param>
-        /// <param name="retryAttempts">Number of retries for polly wrapper.</param>
-        /// <param name="waitTimeInSeconds">Wait time before retrying.</param>
         /// <returns>ApplicationHost with typed web client added.</returns>
-        public AppHostBuilder AddHttpClientTyped<T>(string name, string baseUrlAddress, int retryAttempts = 3, int waitTimeInSeconds = 5)
+        public AppHostBuilder AddHttpClientTyped<T>(string name, string baseUrlAddress)
             where T : class
         {
             _services.AddHttpClient(name, client => client.BaseAddress = new Uri(baseUrlAddress))
-                .AddTypedClient<T>()
-                .AddTransientHttpErrorPolicy(policy =>
-                    policy.WaitAndRetryAsync(
-                        retryCount: retryAttempts,
-                        sleepDurationProvider: attempt => TimeSpan.FromSeconds(waitTimeInSeconds),
-                        onRetry: (ex, calculatedWaitDuration) =>
-                        {
-                            _appHost._logger.LogError($"An exception has been caught by retry/wait policy: {ex.Exception.Message}");
-                            _appHost._logger.LogWarning($"Retry policy executed for type {typeof(T).Name}");
-                        }));
-
+                .AddTypedClient<T>();
             return this;
         }
 
-        /// <summary>Enables an endpoint for each of the hosted processes, as well as a "swagger" endpoint for listing all services available.</summary>
+        /// <summary>
+        /// Enables an endpoint for each of the hosted processes, as well as a "swagger" endpoint for listing all services available.
+        /// If you enable this - the hosted processes WILL NOT execute on startup, instead, they will wait to be triggered.
+        /// </summary>
         public AppHostBuilder UseHostedProcessEndpoints()
         {
             _enableProcessEndpoints = true;
@@ -319,13 +290,14 @@
                 throw new InvalidOperationException("ApplicationHost has already been built and can only be built once");
 
             _hasBuilt = true;
-            
+
             _prov = _services.BuildServiceProvider();
+            _processTypes.AddRange(ServiceCollectionExtensions.ProcessTypes);
 
             // Setup service endpoints for hosted processes (if configured).
             ConfigureWebHost();
-            
-            _appHost = new AppHost(_webHost, _retryPolicies, _prov, _processTypes, _backgroundMonitor);
+
+            _appHost = new AppHost(_webHost, _retryPolicies, _prov, _processTypes, _backgroundMonitor, false, _enableProcessEndpoints);
 
             return _appHost;
         }
@@ -341,66 +313,104 @@
         }
 
         private void SetupServiceEndpoints()
-        {   
+        {
             _webBuilder.Configure(app =>
             {
-                var logger = app.ApplicationServices.GetService<ILogger<AppHostBuilder>>();
+                // Add a probe endppoint that can be used to check the application is still alive.
+                EnableProbeEndpoint(app);
 
-                if (_usesProbe)
-                {
-                    app.Map("/probe", mapRun =>
-                        mapRun.Run(async context =>
-                        {
-                            context.Response.StatusCode = _appHost.Status != HostStatus.Faulted ? 200 : 500;
-                            await context.Response.WriteAsync(_appHost.Status.ToString());
-                        }));
-                }
+                // Add an endpoint for each hosted process.
+                EnableProcessEndpoints(app);
 
-                if (_enableProcessEndpoints)
-                {
-                    foreach (var processType in _processTypes.Distinct())
-                    {
-                        app.Map($"/{processType.Name}", mapRun =>
-                            mapRun.Run(async context =>
-                            {
-                                logger.LogInformation($"Endpoint called, executing process {processType.Name}");
-                                
-                                try
-                                {
-                                    if (!(_prov.GetService(processType) is IHostedProcess process))
-                                        throw new NullReferenceException($"Could not find process type {processType.Name}");
-
-                                    await process.Start(_appHost.Context, default(CancellationToken));
-                                    process.Stop();
-
-                                    context.Response.StatusCode = 200;
-                                    await context.Response.WriteAsync($"Start {processType.Name} ran successfully");
-                                }
-                                catch (Exception e)
-                                {
-                                    logger.LogError($"ServiceEndpoint: Problem during process start for process type {processType.Name}",e);
-                                    context.Response.StatusCode = 500;
-                                    await context.Response.WriteAsync($"Problem executing process via endpoint {e.Message}");
-                                }
-                            }));
-                    }
-                    
-                    app.Map("/swagger", map =>
-                        map.Run(async context =>
-                        {
-                            context.Response.StatusCode = 200;
-
-                            var url = BaseUrl.Replace("0.0.0.0", "localhost");
-
-                            if (_usesProbe)
-                                await context.Response.WriteAsync(string.Format(_link, url + "probe"));
-
-                            foreach (var service in _processTypes)
-                                await context.Response.WriteAsync(string.Format(_link, url + service.Name));
-                        
-                        }));
-                }
+                // Add swagger like documentation.
+                EnableSwaggerEndpoint(app);
             });
+        }
+
+        /// <summary>
+        /// Add an endpoint called "probe" which can be called to return the status of the component.
+        /// </summary>
+        /// <param name="app">App to add the endpoint.</param>
+        private void EnableProbeEndpoint(IApplicationBuilder app)
+        {
+            if (!_usesProbe)
+                return;
+
+            // Add probe controller endpoint.
+            app.Map("/probe", mapRun =>
+                mapRun.Run(async context =>
+                {
+                    context.Response.StatusCode = _appHost.Status != HostStatus.Faulted ? 200 : 500;
+                    await context.Response.WriteAsync(_appHost.Status.ToString());
+                }));
+        }
+
+        /// <summary>
+        /// Add an endpoint for each of our hosted processes.
+        /// </summary>
+        /// <param name="app">App to add each endpoint.</param>
+        private void EnableProcessEndpoints(IApplicationBuilder app)
+        {
+            if (!_enableProcessEndpoints)
+                return;
+
+            var logger = app.ApplicationServices.GetService<ILogger<AppHostBuilder>>();
+
+            foreach (var processType in _processTypes.Distinct())
+            {
+                app.Map($"/{processType.Name}", mapRun =>
+                    mapRun.Run(async context =>
+                    {
+                        logger.LogInformation($"Endpoint called, executing process {processType.Name}");
+
+                        try
+                        {
+                            if (!(_prov.GetService(processType) is IHostedProcess process))
+                                throw new InvalidOperationException($"Could not find process type {processType.Name}");
+
+                            await process.Start(_appHost.Context, default(CancellationToken));
+                            process.Stop();
+
+                            context.Response.StatusCode = 200;
+                            await context.Response.WriteAsync($"Start {processType.Name} ran successfully");
+                        }
+                        catch (InvalidOperationException n)
+                        {
+                            logger.LogError($"ServiceEndpoint: Process type {processType.Name} not found", n);
+                            context.Response.StatusCode = 404;
+                            await context.Response.WriteAsync($"Could not find process with endpoint {n.Message}");
+                        }
+                        catch (Exception e)
+                        {
+                            logger.LogError($"ServiceEndpoint: Problem during process start for process type {processType.Name}", e);
+                            context.Response.StatusCode = 500;
+                            await context.Response.WriteAsync($"Problem executing process via endpoint {e.Message}");
+                        }
+                    }));
+            }
+        }
+
+        /// <summary>
+        /// Add a swagger endpoint that can document this app's endpoints.  Only added if probe or process endpoints were added.
+        /// </summary>
+        /// <param name="app">App to add the endpoint to.</param>
+        private void EnableSwaggerEndpoint(IApplicationBuilder app)
+        {
+            // Write out a swagger like document for each process.
+            app.Map("/swagger", map =>
+                map.Run(async context =>
+                {
+                    context.Response.StatusCode = 200;
+
+                    var url = BaseUrl.Replace("0.0.0.0", "localhost");
+
+                    if (_usesProbe)
+                        await context.Response.WriteAsync(string.Format(_link, url + "probe"));
+
+                    foreach (var service in _processTypes)
+                        await context.Response.WriteAsync(string.Format(_link, url + service.Name));
+
+                }));
         }
     }
 }

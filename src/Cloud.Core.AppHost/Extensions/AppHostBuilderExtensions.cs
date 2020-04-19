@@ -27,7 +27,7 @@
 
             try
             {
-                MethodInfo configureAppConfiguration = startupType.GetMethod("ConfigureAppConfiguration");
+                var configureAppConfiguration = startupType.GetMethod("ConfigureAppConfiguration");
 
                 if (configureAppConfiguration != null)
                     hostBuilder.ConfigureAppConfiguration((configuration) => configureAppConfiguration.Invoke(instance, new object[] { configuration }));
@@ -41,7 +41,7 @@
 
             try
             {
-                MethodInfo configureLogging = startupType.GetMethod("ConfigureLogging");
+                var configureLogging = startupType.GetMethod("ConfigureLogging");
 
                 if (configureLogging != null)
                     hostBuilder.ConfigureLogging((configuration, loggingBuilder) => configureLogging.Invoke(instance, new object[] { configuration, loggingBuilder }));
@@ -55,7 +55,7 @@
 
             try
             {
-                MethodInfo configureServices = startupType.GetMethod("ConfigureServices");
+                var configureServices = startupType.GetMethod("ConfigureServices");
 
                 if (configureServices != null)
                     hostBuilder.ConfigureServices((configuration, logger, serviceCollection) => configureServices.Invoke(instance, new object[] { configuration, logger, serviceCollection }));

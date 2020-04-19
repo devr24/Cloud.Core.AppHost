@@ -10,7 +10,7 @@
     /// </summary>
     public class AppHostContext
     {
-        private int _monitorFrequencySeconds;
+        private readonly int _monitorFrequencySeconds;
         private readonly ILogger _logger;
         private readonly Stopwatch _elapsedTime;
         private Timer _monitor;
@@ -65,7 +65,7 @@
                 _ =>
                 {
                     var timespan = _elapsedTime.Elapsed;
-                    _logger.LogDebug($"{SystemInfo.AppName} running time: {timespan.ToString("dd")} day(s) {timespan.ToString("hh")}:{timespan.ToString("mm")}:{timespan.ToString("ss")}.{timespan.ToString("fff")}");
+                    _logger.LogDebug($"{SystemInfo.AppName} running time: {timespan:dd} day(s) {timespan:hh}:{timespan:mm}:{timespan:ss}.{timespan:fff}");
 
                     BackgroundTimerTick?.Invoke(timespan);
                 },

@@ -254,3 +254,4 @@ paket-files/
 /src/Tests/coverage.opencover.xml
 /src/ConsoleApp2
 /src/ConsoleApp1
+/src/.sonarqube/conf/0
