@@ -206,30 +206,30 @@ public interface IHostedProcess
 An example of an implementing IHostedProcess class would be the following:
 
 ```csharp
-    // Example process that implements IHostedProcess.
-    public class MySampleProcess : IHostedProcess
+// Example process that implements IHostedProcess.
+public class MySampleProcess : IHostedProcess
+{
+    // Setup any services the main Run process may require.
+    public void Start(AppHostContext context, CancellationToken token)
     {
-        // Setup any services the main Run process may require.
-        public void Start(AppHostContext context, CancellationToken token)
-        {
-            Console.WriteLine("Started up! Doing work...");
-            Thread.Sleep(3000);
-            Console.WriteLine("Work done");
-        }
-
-        // Clean up any services used, make any final calls out before closing.
-        public void Stop()
-        {
-            Console.WriteLine("Shut down triggered!!");
-        }
-
-        // General error has occurred - captured here before shut down begins as an
-        // opportunity for the caller to handle.
-        public void Error(Exception ex)
-        {
-            Console.WriteLine($"An error happened: {ex.Message}");
-        }
+        Console.WriteLine("Started up! Doing work...");
+        Thread.Sleep(3000);
+        Console.WriteLine("Work done");
     }
+
+    // Clean up any services used, make any final calls out before closing.
+    public void Stop()
+    {
+        Console.WriteLine("Shut down triggered!!");
+    }
+
+    // General error has occurred - captured here before shut down begins as an
+    // opportunity for the caller to handle.
+    public void Error(Exception ex)
+    {
+        Console.WriteLine($"An error happened: {ex.Message}");
+    }
+}
 ```
 
 Now this class is ready to be hosted!  Add your hosted processes to AppHostBuilder - you can add multiple hosted processes (they will be started in the order they are added).
