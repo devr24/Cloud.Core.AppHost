@@ -78,7 +78,7 @@ method is called.  The Build method creates an instance of AppHost, which will s
 it will only be MySampleProcess that is started and stopped).
 
 
-#### Additional features of AppHostBuilder
+### Additional features of AppHostBuilder
 
   **ConfigureAppConfig** - Configure your application IConfigurationRoot here.  Add config from various sources such as an AppSettings.json or Environment variables.
 
