@@ -92,7 +92,7 @@ namespace Cloud.Core.AppHost
             Context = new AppHostContext(_monitorFrequency, HostSystemInfo, _logger);
 
             // Attach to domain wide exceptions.
-            AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) => _logger?.LogError($"Unhandled exception captured: {eventArgs.ExceptionObject.ToString()}");
+            AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) => _logger?.LogError($"Unhandled exception captured: {eventArgs.ExceptionObject}");
             AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) => { _logger?.LogWarning("Application exit captured"); ProcessingStop(); };
             Console.CancelKeyPress += (sender, eventArgs) => { _logger?.LogWarning("Application cancel keys triggered"); eventArgs.Cancel = true; ProcessingStop(); };
         }
