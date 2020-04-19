@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Version>3.1</Version>
     <TargetFramework>netstandard2.1</TargetFramework>
     <Company>Robert McCabe</Company>
     <IsPackable>true</IsPackable>
@@ -10,6 +9,7 @@
     <PackageTags>Cloud.Core.AppHost AppJob JobHost .net-Core Core Process WebJob Container</PackageTags>
     <PackageReleaseNotes />
     <Copyright>Cloud.Core.AppHost</Copyright>
+    <Version>3.1</Version>
 	<PackageIconUrl>https://cloud1core.blob.core.windows.net/icons/CC.png</PackageIconUrl>
     <ProjectGuid>{27EF06EA-0C40-5CF3-3413-A51FB184D690}</ProjectGuid>
     <Authors>Robert McCabe</Authors>

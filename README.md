@@ -1,9 +1,6 @@
 # **Cloud.Core.AppHost** [![Build status](https://dev.azure.com/cloudcoreproject/CloudCore/_apis/build/status/Cloud.Core/Cloud.Core.AppHost_Package)](https://dev.azure.com/cloudcoreproject/CloudCore/_build/latest?definitionId=7) ![Code Coverage](https://cloud1core.blob.core.windows.net/codecoveragebadges/Cloud.Core.AppHost-LineCoverage.png) [![Cloud.Core.AppHost package in Cloud.Core feed in Azure Artifacts](https://feeds.dev.azure.com/cloudcoreproject/dfc5e3d0-a562-46fe-8070-7901ac8e64a0/_apis/public/Packaging/Feeds/8949198b-5c74-42af-9d30-e8c462acada6/Packages/dbfd6121-7f3d-451e-ae14-7fa76967892f/Badge)](https://dev.azure.com/cloudcoreproject/CloudCore/_packaging?_a=package&feed=8949198b-5c74-42af-9d30-e8c462acada6&package=dbfd6121-7f3d-451e-ae14-7fa76967892f&preferRelease=true)
 
-
-
 <div id="description">
-
 Common functionality for hosting process execution in a standard way on Windows or Linux as an app or service (as well as within a container).
 
 This package contains classes to host implementing interfaces to catch unhandled exception handling and carry out various self-healing 
@@ -13,7 +10,6 @@ Handles the SIGTERM command to shut down on multiple operating systems.
 
 The sequence of flow is shown in the example below.  This is a console application, hosted within a Kubernetes node.  We can see that 
 if the node sends a termination signal, the application will have an opportunity to gracefully shut down.
-
 </div>
 
 ![sequence](contents/sequence.png)
@@ -209,6 +205,7 @@ public interface IHostedProcess
 ```
 An example of an implementing IHostedProcess class would be the following:
 
+```csharp
     // Example process that implements IHostedProcess.
     public class MySampleProcess : IHostedProcess
     {
@@ -233,6 +230,7 @@ An example of an implementing IHostedProcess class would be the following:
             Console.WriteLine($"An error happened: {ex.Message}");
         }
     }
+```
 
 Now this class is ready to be hosted!  Add your hosted processes to AppHostBuilder - you can add multiple hosted processes (they will be started in the order they are added).
 
