@@ -25,7 +25,6 @@
         private readonly IServiceCollection _services = new ServiceCollection();
         internal readonly List<AsyncPolicy> _retryPolicies = new List<AsyncPolicy>();
         internal readonly List<Type> _processTypes = new List<Type>();
-        internal IConfiguration _config;
         internal IWebHostBuilder _webBuilder = WebHost.CreateDefaultBuilder(null);
         internal IConfigurationBuilder _configBuilder = new ConfigurationBuilder();
         internal IWebHost _webHost;
@@ -36,10 +35,25 @@
         internal bool _usesProbe;
         internal string _link = "<a href='{0}'>{0}</a><br/>";
         internal int _backgroundMonitor = -1;
-        internal ILogger InternalLogger;
+        internal ILogger _internalLogger;
+        internal object _startup;
 
-        public IConfiguration Config => _config;
+        /// <summary>
+        /// Gets the configuration.
+        /// </summary>
+        /// <value>The configuration.</value>
+        public IConfiguration Config { get; internal set; }
+
+        /// <summary>
+        /// Gets the base URL.
+        /// </summary>
+        /// <value>The base URL.</value>
         public string BaseUrl => $"http://0.0.0.0:{_webPort}/";
+
+        /// <summary>
+        /// Gets the host system information.
+        /// </summary>
+        /// <value>The host system information.</value>
         public SystemInfo HostSystemInfo { get; } = new SystemInfo();
 
         /// <summary>
@@ -50,7 +64,7 @@
         {
             _outputConfigInfo = outputConfigInfo;
             _services.AddLogging(loggers => loggers.AddConsole());
-            InternalLogger = _services.BuildServiceProvider().GetService<ILogger<AppHostBuilder>>();
+            _internalLogger = _services.BuildServiceProvider().GetService<ILogger<AppHostBuilder>>();
         }
 
         /// <summary>
@@ -62,12 +76,12 @@
         {
             try
             {
-                _services.AddLogging(loggers => configure(_config ?? new ConfigurationBuilder().Build(), loggers));
-                InternalLogger = _services.BuildServiceProvider().GetService<ILogger<AppHostBuilder>>();
+                _services.AddLogging(loggers => configure(Config ?? new ConfigurationBuilder().Build(), loggers));
+                _internalLogger = _services.BuildServiceProvider().GetService<ILogger<AppHostBuilder>>();
             }
             catch (Exception e)
             {
-                InternalLogger.LogError($"Error during ConfigureLogging: {e.Message}");
+                _internalLogger.LogError(e, $"Error during ConfigureLogging: {e.Message}");
                 throw;
             }
 
@@ -83,17 +97,19 @@
             {
                 configure(_configBuilder);
 
-                _config = _configBuilder.Build();
+                Config = _configBuilder.Build();
 
-                _services.AddSingleton(_config);
+                _services.AddSingleton(Config);
 
                 // Additional output information to the console, before the logger has been built.
                 if (_outputConfigInfo)
-                    InternalLogger.LogInformation(_config.GetAllSettingsAsString());
+                {
+                    _internalLogger.LogInformation(Config.GetAllSettingsAsString());
+                }
             }
             catch (Exception e)
             {
-                InternalLogger.LogError($"Error during ConfigureAppConfiguration: {e.Message}");
+                _internalLogger.LogError(e, $"Error during ConfigureAppConfiguration: {e.Message}");
                 throw;
             }
 
@@ -109,12 +125,12 @@
         {
             try
             {
-                InternalLogger.LogInformation($"SystemInfo: {HostSystemInfo}");
-                configureServices(_config ?? new ConfigurationBuilder().Build(), InternalLogger, _services);
+                _internalLogger.LogInformation($"SystemInfo: {HostSystemInfo}");
+                configureServices(Config ?? new ConfigurationBuilder().Build(), _internalLogger, _services);
             }
             catch (Exception e)
             {
-                InternalLogger.LogError($"Error during ConfigureServices: {e.Message}");
+                _internalLogger.LogError(e,$"Error during ConfigureServices: {e.Message}");
                 throw;
             }
             return this;
@@ -138,7 +154,7 @@
 
                 onRetry: (exception, calculatedWaitDuration) =>
                 {
-                    _appHost._logger.LogError($"An exception has been caught by retry/wait policy: {exception.Message}");
+                    _appHost._logger.LogError(exception, $"An exception has been caught by retry/wait policy: {exception.Message}");
                     _appHost._logger.LogWarning($"Retry policy executed for type {typeof(T).Name}");
                 });
 
@@ -172,7 +188,9 @@
         public AppHostBuilder UseBackgroundMonitor(int tickTimeInSeconds)
         {
             if (tickTimeInSeconds < 1)
+            {
                 throw new ArgumentException("Tick time must be greater than zero");
+            }
 
             _backgroundMonitor = tickTimeInSeconds;
 
@@ -287,10 +305,11 @@
         public IAppHost Build()
         {
             if (_hasBuilt)
+            {
                 throw new InvalidOperationException("ApplicationHost has already been built and can only be built once");
+            }
 
             _hasBuilt = true;
-
             _prov = _services.BuildServiceProvider();
             _processTypes.AddRange(ServiceCollectionExtensions.ProcessTypes);
 
@@ -302,6 +321,9 @@
             return _appHost;
         }
 
+        /// <summary>
+        /// Configures the web host.
+        /// </summary>
         private void ConfigureWebHost()
         {
             if (_enableProcessEndpoints || _usesProbe)
@@ -312,11 +334,14 @@
             }
         }
 
+        /// <summary>
+        /// Setups the service endpoints.
+        /// </summary>
         private void SetupServiceEndpoints()
         {
             _webBuilder.Configure(app =>
             {
-                // Add a probe endppoint that can be used to check the application is still alive.
+                // Add a probe endpoint that can be used to check the application is still alive.
                 EnableProbeEndpoint(app);
 
                 // Add an endpoint for each hosted process.
@@ -334,7 +359,9 @@
         private void EnableProbeEndpoint(IApplicationBuilder app)
         {
             if (!_usesProbe)
+            {
                 return;
+            }
 
             // Add probe controller endpoint.
             app.Map("/probe", mapRun =>
@@ -352,7 +379,9 @@
         private void EnableProcessEndpoints(IApplicationBuilder app)
         {
             if (!_enableProcessEndpoints)
+            {
                 return;
+            }
 
             var logger = app.ApplicationServices.GetService<ILogger<AppHostBuilder>>();
 
@@ -366,9 +395,11 @@
                         try
                         {
                             if (!(_prov.GetService(processType) is IHostedProcess process))
+                            {
                                 throw new InvalidOperationException($"Could not find process type {processType.Name}");
+                            }
 
-                            await process.Start(_appHost.Context, default(CancellationToken));
+                            await process.Start(_appHost._context, default);
                             process.Stop();
 
                             context.Response.StatusCode = 200;
@@ -376,13 +407,13 @@
                         }
                         catch (InvalidOperationException n)
                         {
-                            logger.LogError($"ServiceEndpoint: Process type {processType.Name} not found", n);
+                            logger.LogError(n, $"ServiceEndpoint: Process type {processType.Name} not found");
                             context.Response.StatusCode = 404;
                             await context.Response.WriteAsync($"Could not find process with endpoint {n.Message}");
                         }
                         catch (Exception e)
                         {
-                            logger.LogError($"ServiceEndpoint: Problem during process start for process type {processType.Name}", e);
+                            logger.LogError(e,$"ServiceEndpoint: Problem during process start for process type {processType.Name}");
                             context.Response.StatusCode = 500;
                             await context.Response.WriteAsync($"Problem executing process via endpoint {e.Message}");
                         }
@@ -405,7 +436,9 @@
                     var url = BaseUrl.Replace("0.0.0.0", "localhost");
 
                     if (_usesProbe)
+                    {
                         await context.Response.WriteAsync(string.Format(_link, url + "probe"));
+                    }
 
                     foreach (var service in _processTypes)
                         await context.Response.WriteAsync(string.Format(_link, url + service.Name));

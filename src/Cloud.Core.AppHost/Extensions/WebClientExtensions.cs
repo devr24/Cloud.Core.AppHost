@@ -2,43 +2,59 @@
 
 namespace Cloud.Core.AppHost.Extensions
 {
+    /// <summary>
+    /// Class WebClientExtensions.
+    /// </summary>
     public static class WebClientExtensions
     {
-        public static string GetExternalIPAddress()
+        /// <summary>
+        /// Gets the external ip address.
+        /// </summary>
+        /// <value>The external ip address.</value>
+        internal static string ExternalIpAddress { get; private set; }
+
+        /// <summary>
+        /// Gets the external ip address.
+        /// </summary>
+        /// <returns>System.String.</returns>
+        public static string GetExternalIpAddress()
         {
-            string result = string.Empty;
-
-            string[] checkIPUrl =
+            // This ensures the address is only looked up once.
+            if (ExternalIpAddress == null)
             {
-                "https://ipinfo.io/ip",
-                "https://checkip.amazonaws.com/",
-                "https://api.ipify.org",
-                "https://icanhazip.com",
-                "https://wtfismyip.com/text"
-            };
+                string result = string.Empty;
 
-            using (var client = new WebClient())
-            {
-                client.Headers["User-Agent"] = "Mozilla/4.0 (Compatible; Windows NT 5.1; MSIE 6.0) " +
-                                               "(compatible; MSIE 6.0; Windows NT 5.1; .NET CLR 1.1.4322; .NET CLR 2.0.50727)";
-
-                foreach (var url in checkIPUrl)
+                string[] checkIpUrl =
                 {
-                    try
-                    {
-                        result = client.DownloadString(url);
-                    }
-                    catch
-                    {
-                        // Do nothing on exception.
-                    }
+                    "https://ipinfo.io/ip", "https://checkip.amazonaws.com/", "https://api.ipify.org",
+                    "https://icanhazip.com", "https://wtfismyip.com/text"
+                };
 
-                    if (!string.IsNullOrEmpty(result))
-                        break;
+                using (var client = new WebClient())
+                {
+                    client.Headers["User-Agent"] = "Mozilla/4.0 (Compatible; Windows NT 5.1; MSIE 6.0) " +
+                                                   "(compatible; MSIE 6.0; Windows NT 5.1; .NET CLR 1.1.4322; .NET CLR 2.0.50727)";
+
+                    foreach (var url in checkIpUrl)
+                    {
+                        try
+                        {
+                            result = client.DownloadString(url);
+                        }
+                        catch
+                        {
+                            // Do nothing on exception.
+                        }
+
+                        if (!string.IsNullOrEmpty(result))
+                            break;
+                    }
                 }
+
+                ExternalIpAddress = result.Replace("\n", "").Trim();
             }
 
-            return result.Replace("\n", "").Trim();
+            return ExternalIpAddress;
         }
     }
 }

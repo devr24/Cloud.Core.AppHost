@@ -4,9 +4,12 @@
     using System.Collections.Generic;
     using Cloud.Core.AppHost;
 
+    /// <summary>
+    /// Class ServiceCollection extensions.
+    /// </summary>
     public static class ServiceCollectionExtensions
     {
-        internal readonly static List<Type> ProcessTypes = new List<Type>();
+        internal static readonly List<Type> ProcessTypes = new List<Type>();
 
         /// <summary>
         /// Adds the _appHosted process.

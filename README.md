@@ -60,15 +60,20 @@ public class Program
    {
       try
       { 
+	     // Create the host.
          var host = new AppHostBuilder()
                     .AddHostedProcess<MySampleProcess>()
                     .Build();
+					
+		 // Run all hosted processes once.
          host.RunOnce();
       }
       catch (Exception e)
       {
-         Console.WriteLine("Problem during startup:");
-         Console.WriteLine(e);
+		  // Catch startup errors.
+          Console.WriteLine($"Problem occured during startup of {Assembly.GetExecutingAssembly().GetName().Name}");
+          Console.WriteLine(e);
+          throw;
       }
    }
 }
@@ -120,7 +125,8 @@ public class Program
    {
       try
       { 
-        var host = new AppHostBuilder().CreateDefaultBuilder()
+	     // Create the host.
+         var host = new AppHostBuilder().CreateDefaultBuilder()
             .ConfigureAppConfiguration(configBuilder => {
                configBuilder.UseKubernetesContainerConfig();
             })
@@ -132,12 +138,16 @@ public class Program
             })
             .AddHostedProcess<MySampleProcess>()
             .Build();
+			
+		 // Run all hosted processes and stay alive.
          host.RunAndBlock();
       }
       catch (Exception e)
       {
-         Console.WriteLine("Problem during startup:");
-         Console.WriteLine(e);
+		  // Catch startup errors.
+          Console.WriteLine($"Problem occured during startup of {Assembly.GetExecutingAssembly().GetName().Name}");
+          Console.WriteLine(e);
+          throw;
       }
    }
 }
@@ -154,16 +164,21 @@ public class Program
    {
       try
       { 
+	     // Create the host.
          var host = new AppHostBuilder().CreateDefaultBuilder()
                     .UseStartup<Startup>()
                     .AddHostedProcess<MySampleProcess>()
                     .Build();
+					
+		 // Run all hosted processes and stay alive.
         host.RunAndBlock();
       }
       catch (Exception e)
       {
-         Console.WriteLine("Problem during startup:");
-         Console.WriteLine(e);
+		  // Catch startup errors.
+          Console.WriteLine($"Problem occured during startup of {Assembly.GetExecutingAssembly().GetName().Name}");
+          Console.WriteLine(e);
+          throw;
       }
     }
 }
@@ -173,17 +188,20 @@ Where Startup class is defined as follows:
 ```csharp
 public class Startup
 {
+    // Setup all configuration sources.
     public void ConfigureAppConfiguration(IConfigurationBuilder builder)
     {
 	    builder.UseDefaultConfig();
     }
 
+    // Setup loggers to be utilised by ILogger
     public void ConfigureLogging(IConfiguration config, ILoggingBuilder builder)
     {
 	    builder.AddConfiguration(config.GetSection("Logging"));
 	    builder.AddConsole();
     }
 
+    // Dependency root - setup services to be injected throughout the application.
     public void ConfigureServices(IConfiguration config, ILogger logger, IServiceCollection services)
     {
 	    serviceBuilder.AddSingleton<SomeService>();

@@ -24,6 +24,7 @@
         public static AppHostBuilder UseStartup(this AppHostBuilder hostBuilder, Type startupType)
         {
             var instance = Activator.CreateInstance(startupType);
+            hostBuilder._startup = instance;
 
             try
             {
@@ -35,7 +36,7 @@
             catch (Exception ex) when (ex is TargetParameterCountException)
             {
                 var exMsg = "Could not run ConfigureAppConfiguration method, ensure param (IConfigurationBuilder) has been set in method signature";
-                hostBuilder.InternalLogger.LogError(exMsg, ex);
+                hostBuilder._internalLogger.LogError(ex, exMsg);
                 throw new ArgumentException(exMsg, ex);
             }
 
@@ -49,7 +50,7 @@
             catch (Exception ex) when (ex is TargetParameterCountException)
             {
                 var exMsg = "Could not run ConfigureLogging, ensure params (IConfigurationRoot, ILoggingBuilder) have been set in method signature";
-                hostBuilder.InternalLogger.LogError(exMsg);
+                hostBuilder._internalLogger.LogError(ex, exMsg);
                 throw new ArgumentException(exMsg, ex);
             }
 
@@ -63,7 +64,7 @@
             catch (Exception ex) when (ex is TargetParameterCountException)
             {
                 var exMsg = "Could not run ConfigureServices, ensure params (IConfigurationRoot, ILogger, IServiceCollection) have been set in method signature";
-                hostBuilder.InternalLogger.LogError(exMsg);
+                hostBuilder._internalLogger.LogError(ex, exMsg);
                 throw new ArgumentException(exMsg, ex);
             }
 

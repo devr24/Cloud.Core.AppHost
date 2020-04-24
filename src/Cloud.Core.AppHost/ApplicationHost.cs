@@ -53,7 +53,8 @@ namespace Cloud.Core.AppHost
         internal readonly ServiceProvider _serviceProvider;
         internal readonly ILogger _logger;
         internal readonly IEnumerable<Type> _hostedProcessTypes;
-        internal readonly AppHostContext Context;
+        internal readonly AppHostContext _context;
+        internal readonly object _lock = new object();
 
         /// <summary>
         /// Gets the status.
@@ -89,10 +90,10 @@ namespace Cloud.Core.AppHost
             _showSystemInfo = showSystemInfo;
             _usingServiceEndpoints = usingServiceEndpoints;
 
-            Context = new AppHostContext(_monitorFrequency, HostSystemInfo, _logger);
+            _context = new AppHostContext(_monitorFrequency, HostSystemInfo, _logger);
 
             // Attach to domain wide exceptions.
-            AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) => _logger?.LogError($"Unhandled exception captured: {eventArgs.ExceptionObject}");
+            AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) => _logger?.LogError(eventArgs.ExceptionObject as Exception, $"Unhandled exception captured: {eventArgs.ExceptionObject}");
             AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) => { _logger?.LogWarning("Application exit captured"); ProcessingStop(); };
             Console.CancelKeyPress += (sender, eventArgs) => { _logger?.LogWarning("Application cancel keys triggered"); eventArgs.Cancel = true; ProcessingStop(); };
         }
@@ -103,9 +104,9 @@ namespace Cloud.Core.AppHost
         /// <param name="runOnce">if set to <c>true</c> [run once].</param>
         internal void Run(bool runOnce = false)
         {
-            Context.IsContinuouslyRunning = !runOnce;
+            _context.IsContinuouslyRunning = !runOnce;
             if (_monitorFrequency > 0)
-                Context.StartMonitor();
+                _context.StartMonitor();
 
             _logger?.LogInformation("Running app host");
 
@@ -153,12 +154,12 @@ namespace Cloud.Core.AppHost
                 _logger?.LogInformation($"Starting hosted process {processType.Name}");
 
                 // Run the hosted process, wrapped in polly retry logic.
-                BuildWrappedPolicy().ExecuteAsync(token => hostedProcess?.Start(Context, _cancellation.Token), _cancellation.Token)
+                BuildWrappedPolicy().ExecuteAsync(token => hostedProcess?.Start(_context, _cancellation.Token), _cancellation.Token)
                     .ContinueWith(p =>
                     {
                         if (p.IsFaulted || p.Status == TaskStatus.Canceled)
                         {
-                            _logger?.LogError($"Error running hosted process {processType.Name} execution {p.Exception?.Message}");
+                            _logger?.LogError(p.Exception, $"Error running hosted process {processType.Name} execution {p.Exception?.Message}");
                             ProcessError(hostedProcess, p.Exception, !runOnce);
                         }
 
@@ -178,51 +179,55 @@ namespace Cloud.Core.AppHost
         /// </summary>
         internal void ProcessingStop()
         {
-            if (_stopped)
-                return;
-
-            _stopped = true;
-
-            if (Status != HostStatus.Faulted)
-                Status = HostStatus.Stopping;
-
-            try
+            lock (_lock)
             {
-                _cancellation.Cancel(true);
+                if (_stopped)
+                    return;
 
-                _logger?.LogWarning("Stopping process host");
+                _stopped = true;
 
-                if (_hostedProcessTypes != null && _hostedProcessTypes.Any())
+                if (Status != HostStatus.Faulted)
+                    Status = HostStatus.Stopping;
+
+                try
                 {
-                    foreach (Type processType in _hostedProcessTypes.Reverse())
+                    _cancellation.Cancel(true);
+
+                    _logger?.LogWarning("Stopping process host");
+
+                    if (_hostedProcessTypes != null && _hostedProcessTypes.Any())
                     {
-                        var hostedProcess = _serviceProvider.GetService(processType) as IHostedProcess;
-                        try
+                        foreach (Type processType in _hostedProcessTypes.Reverse())
                         {
-                            hostedProcess?.Stop();
-                        }
-                        catch (Exception e)
-                        {
-                            _logger?.LogError($"Error during \"Stop\" execution for {processType.Name}: {e.Message}");
-                            ProcessError(hostedProcess, e);
+                            var hostedProcess = _serviceProvider.GetService(processType) as IHostedProcess;
+                            try
+                            {
+                                hostedProcess?.Stop();
+                            }
+                            catch (Exception e)
+                            {
+                                _logger?.LogError(e,
+                                    $"Error during \"Stop\" execution for {processType.Name}: {e.Message}");
+                                ProcessError(hostedProcess, e);
+                            }
                         }
                     }
                 }
-            }
-            catch (Exception e)
-            {
-                _logger?.LogError($"Error stopping process host: {e.Message}");
-            }
-            finally
-            {
-                _logger?.LogWarning("Releasing KeepAliveEvent main app thread will exit");
-                _keepAliveEvent.Set();
+                catch (Exception e)
+                {
+                    _logger?.LogError(e, $"Error stopping process host: {e.Message}");
+                }
+                finally
+                {
+                    _logger?.LogWarning("Releasing KeepAliveEvent main app thread will exit");
+                    _keepAliveEvent.Set();
 
-                _webHost?.Dispose();
-                Context.StopMonitor();
+                    _webHost?.Dispose();
+                    _context.StopMonitor();
 
-                if (Status != HostStatus.Faulted)
-                    Status = HostStatus.Stopped;
+                    if (Status != HostStatus.Faulted)
+                        Status = HostStatus.Stopped;
+                }
             }
         }
 
@@ -248,9 +253,9 @@ namespace Cloud.Core.AppHost
                     hostedProcess?.Error(e, args);
                     _logger?.LogDebug($"Ran {hostedProcess?.GetType().Name}'s Error method successfully");
                 }
-                catch (Exception exception)
+                catch (Exception ex)
                 {
-                    _logger?.LogError($"Error caught in process error handling for {hostedProcess?.GetType().Name}: {exception.Message}");
+                    _logger?.LogError(ex,$"Error caught in process error handling for {hostedProcess?.GetType().Name}: {ex.Message}");
                 }
 
 

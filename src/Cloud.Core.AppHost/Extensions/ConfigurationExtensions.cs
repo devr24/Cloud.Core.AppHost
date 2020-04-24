@@ -4,6 +4,9 @@
     using System.Collections.Generic;
     using System.Linq;
 
+    /// <summary>
+    /// Class Configuration extensions.
+    /// </summary>
     public static class ConfigurationExtensions
     {
         /// <summary>
@@ -30,7 +33,9 @@
             {
                 // If this is the provider node, format appropriately.
                 if (s.Key == "PROV")
+                {
                     return s.Value;
+                }
 
                 // Otherwise, tab the KeyValue format and return.
                 return $"   [{s.Key}]: {s.Value}";
@@ -61,7 +66,10 @@
 
                     // If providers are to be included AND there are settings, add the provider node.
                     if (includeProviders && settingKeys.Count > 0)
-                        prov.Add(new KeyValuePair<string, string>("PROV", $"{Environment.NewLine}{provider.GetType().Name} [{settingKeys.Count} setting(s)]"));
+                    {
+                        prov.Add(new KeyValuePair<string, string>("PROV",
+                            $"{Environment.NewLine}{provider.GetType().Name} [{settingKeys.Count} setting(s)]"));
+                    }
 
                     // Append each config value, using the keys to identity each.
                     foreach (var settingKey in settingKeys)
@@ -107,6 +115,12 @@
             return keyList;
         }
 
+        /// <summary>
+        /// Adds the child keys.
+        /// </summary>
+        /// <param name="keyList">The key list.</param>
+        /// <param name="provider">The provider.</param>
+        /// <param name="path">The path.</param>
         private static void AddChildKeys(List<string> keyList, IConfigurationProvider provider, string path)
         {
             // Ensure keys are unique before adding new key.
@@ -116,11 +130,19 @@
                 foreach (var kv in kvConfigs)
                 {
                     if (!keyList.Contains(kv))
+                    {
                         keyList.Add(kv);
+                    }
                 }
             }
         }
 
+        /// <summary>
+        /// Gets the full key path.
+        /// </summary>
+        /// <param name="path">The path.</param>
+        /// <param name="key">The key.</param>
+        /// <returns>System.String.</returns>
         private static string GetFullKeyPath(string path, string key)
         {
             return (string.IsNullOrEmpty(path) ? null : path) +

@@ -5,25 +5,27 @@ using Microsoft.Extensions.DependencyInjection;
 using Cloud.Core.AppHost.Extensions;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Threading;
+using Cloud.Core.AppHost.Tests.Extensions;
 using FluentAssertions;
 using Xunit;
 using Cloud.Core.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Memory;
 using Microsoft.Extensions.Logging;
+using Cloud.Core.AppHost.Tests.Fakes;
 
 namespace Cloud.Core.AppHost.Tests
 {
     [IsUnit]
     public class ApplicationHostTest
     {
+        /// <summary>Ensure the builder fails on multiple builds.</summary>
         [Fact]
         public void Test_ApplicationHost_MultipleBuild()
         {
+            // Arrange - setup host.
             var builder = new AppHostBuilder(true).CreateDefaultBuilder()
                 .ConfigureAppConfiguration(configBuilder =>
                 {
@@ -32,78 +34,107 @@ namespace Cloud.Core.AppHost.Tests
                         new KeyValuePair<string, string>("a", "b")
                     });
                 });
+
+            // Act - first build works fine.
             builder.Build();
             builder.Config.GetValue<string>("a").Should().Be("b");
 
-            // Should fail the rebuild method.
+            // Assert - Should fail the second build method call.
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
 
+        /// <summary>Ensure exception is trapped when hosted process stop fails.</summary>
         [Fact]
         public void Test_ApplicationHost_ErrorStopping()
         {
-            var builder = new AppHostBuilder().CreateDefaultBuilder();
-            var host = builder.AddHostedProcess<ErrorStopping>().Build();
+            // Arrange 
+            var builder = new AppHostBuilder().CreateDefaultBuilder()
+                                              .ConfigureLogging((config, logBuilder) => logBuilder.AddFakeLogger());
 
-            // Should fail the rebuild method.
+            // Act - Should fail the rebuild method.
+            var host = builder.AddHostedProcess<ErrorStopping>().Build();
             host.RunOnce();
+            var fakeLogger = host.GetFakeLogger();
+            var logMessage = fakeLogger.LogMessages.Where(m => m.LogLevel == LogLevel.Error && m.ExceptionType == typeof(InvalidOperationException));
+
+            // Assert - expected error should have been caught.
+            logMessage.Should().NotBeNull();
         }
 
+        /// <summary>Verify the hosted process is only called once.</summary>
         [Fact]
         public void Test_ApplicationHost_WithNoRetryPolicies()
         {
+            // Arrange
             var builder = new AppHostBuilder();
-            var host = builder.AddHostedProcess<SimpleService2>().Build();
+            var host = builder.AddHostedProcess<HttpErrorService>().Build();
 
-            // Should fail the rebuild method.
+            // Act - Should fail the rebuild method.
             host.RunOnce();
+            var hostedService = host.GetService<HttpErrorService>();
+
+            // Assert - Only called once.
+            Assert.True(hostedService.CallCount == 1);
         }
 
+        /// <summary>Ensure background timer is called once.</summary>
         [Fact]
         public void Test_ApplicationHost_BackgroundOperation()
         {
-            var hostedService = new SimpleService2();
-
+            // Arrange
+            var hostedService = new BackgroundTimerService();
             var appHost = new AppHostBuilder().UseBackgroundMonitor(3).AddHostedProcess(hostedService).Build();
 
             hostedService.StopProcessing = (context) =>
             {
                 hostedService.StopProcessing = null;
+                var host = ((AppHost)appHost);
+                host._cancellation.Dispose();
+                host.ProcessingStop();
+
+                // Assert
                 context.ApplicationRunDuration.Should().BeGreaterThan(TimeSpan.Zero);
                 context.IsContinuouslyRunning.Should().BeTrue();
                 context.IsBackgroundMonitorRunning.Should().BeTrue();
                 context.SystemInfo.Should().NotBe(null);
-
-                var host = ((AppHost)appHost);
-                host._cancellation.Dispose();
-                host.ProcessingStop();
+                hostedService.BackgroundTickCount.Should().Be(1);
             };
 
+            // Act
             appHost.RunOnce();
         }
 
+        /// <summary>Ensure the background monitor start/stop sets the timer running.</summary>
         [Fact]
-        public void Test_ApplicationHost_BackgroundMonitor()
+        public void Test_AppHostContext_BackgroundMonitor()
         {
+            // Arrange
             var hostContext = new AppHostContext(30, new SystemInfo(), null);
 
+            // Act/Assert
             hostContext.StopMonitor();
+            hostContext.IsBackgroundMonitorRunning.Should().Be(false);
             hostContext.StartMonitor();
+            hostContext.IsBackgroundMonitorRunning.Should().Be(true);
             hostContext.StartMonitor();
+            hostContext.IsBackgroundMonitorRunning.Should().Be(true);
             hostContext.StopMonitor();
-
             hostContext.IsBackgroundMonitorRunning.Should().Be(false);
         }
 
+        /// <summary>Ensure argument exception when invalid background monitor time is passed.</summary>
         [Fact]
         public void Test_ApplicationHost_BackgroundOperationInvalid()
         {
-            var hostedService = new SimpleService2();
+            // Arrange
+            var hostedService = new BackgroundTimerService();
 
+            // Act/Assert
             Assert.Throws<ArgumentException>(() => new AppHostBuilder().UseBackgroundMonitor(0)
                 .AddHostedProcess(hostedService));
         }
 
+        /// <summary>Ensure health probe endpoint is setup correctly.</summary>
         [Fact]
         public void Test_ApplicationHost_HealthProbe()
         {
@@ -146,7 +177,7 @@ namespace Cloud.Core.AppHost.Tests
                 .AddHttpClient("test", "http://localhost:882/")
                 .AddHealthProbe("882")
                 .AddHostedProcess<SimpleService>()
-                .AddHostedProcess<SimpleService1>();
+                .AddHostedProcess<BackgroundTimerService>();
 
             var processHost = builder.Build();
 
@@ -157,28 +188,32 @@ namespace Cloud.Core.AppHost.Tests
 
         }
 
+        /// <summary>Ensure services are created and can be called like end points via http.</summary>
         [Fact]
         public void Test_ApplicationHost_ServiceEndPoint()
         {
+            // Arrange.
             var builder = new AppHostBuilder()
                 .ConfigureServices((config, logger, services) => { services.AddSingleton<SampleDependency>(); })
                 .AddHttpClient("test", "http://localhost:889/")
                 .AddHealthProbe("889")
                 .AddHostedProcess<SimpleService>()
-                .AddHostedProcess<SimpleService1>()
+                .AddHostedProcess<BackgroundTimerService>()
                 .AddHostedProcess<SimpleService2>()
                 .AddHostedProcess<SimpleService2>()
                 .UseHostedProcessEndpoints();
 
             builder._processTypes.Add(typeof(SimpleService3));
 
+            // Act
             var processHost = builder.Build();
             var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>()
                 .CreateClient("test");
 
+            // Assert
             httpClient.GetAsync("probe").GetAwaiter().GetResult().StatusCode.Should().Be(200);
             httpClient.GetAsync(typeof(SimpleService).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
-            httpClient.GetAsync(typeof(SimpleService1).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
+            httpClient.GetAsync(typeof(BackgroundTimerService).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
             httpClient.GetAsync(typeof(SimpleService2).Name).GetAwaiter().GetResult().StatusCode.Should().Be(200);
             httpClient.GetAsync(typeof(SimpleService3).Name).GetAwaiter().GetResult().StatusCode.Should().Be(404);
             httpClient.GetAsync("swagger").GetAwaiter().GetResult().StatusCode.Should().Be(200);
@@ -200,92 +235,96 @@ namespace Cloud.Core.AppHost.Tests
             processHost.ProcessingStop();
         }
 
+        /// <summary>Ensure run once has a status of "stopped" after its been completed multiple times.</summary>
         [Fact]
-        public void Test_ApplicationHost_LogSystemInfo()
+        public void Test_ApplicationHost_RunOnceMultipleTimes()
         {
+            // Run first time.
+            // Arrange
             var builder = new AppHostBuilder()
-                .ConfigureServices((config, logger, services) => services.AddSingleton<SampleDependency>().AddHostedProcess<SimpleService>())
-                .UseHostedProcessEndpoints();
+                .ConfigureServices((config, logger, services) => services.AddSingleton<SampleDependency>()
+                .AddHostedProcess<SimpleService>());
 
+            // Act
             var processHost = builder.Build();
-
             var appHost = new AppHost(((AppHost)processHost)._webHost,
                 ((AppHost)processHost)._retryPolicies,
                 ((AppHost)processHost)._serviceProvider,
                 new List<Type>(), -1, true);
-
             appHost.RunOnce();
 
+            // Assert
             appHost.Status.Should().Be(HostStatus.Stopped);
 
+            // Arrage - Run second time - reach code branches that check for already created params.
             appHost = new AppHost(((AppHost)processHost)._webHost,
                 ((AppHost)processHost)._retryPolicies,
                 new ServiceCollection().BuildServiceProvider(),
                 new List<Type>(), -1, true);
 
+            // Act
             appHost.RunOnce();
 
+            // Assert
             appHost.Status.Should().Be(HostStatus.Stopped);
         }
 
+        /// <summary>Ensure default settings are configured when CreateDefaultBuilder is called.</summary>
         [Fact]
         public void Test_ApplicationHost_DefaultBuilder()
         {
+            // Arrange/Act
             var processHost = new AppHostBuilder().CreateDefaultBuilder().AddHealthProbe("889")
                 .AddHttpClient("test", "http://localhost:889/").AddHostedProcess(new HttpErrorService()).Build();
 
             var memoryCache = ((AppHost)processHost)._serviceProvider.GetService<IMemoryCache>();
             var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>();
+            var res = httpClient.CreateClient("test").GetAsync("probe").GetAwaiter().GetResult();
 
+            // Assert
             memoryCache.Should().NotBe(null);
             httpClient.Should().NotBe(null);
-
-            var res = httpClient.CreateClient("test").GetAsync("probe").GetAwaiter().GetResult();
             res.StatusCode.Should().Be(200);
         }
 
+        /// <summary>Ensure retry mechanisms kick in when expected.</summary>
         [Fact]
         public void Test_ApplicationHost_PollyRetry()
         {
+            // Arrange
             var builder = new AppHostBuilder(true);
-
-            var collection = new List<KeyValuePair<string, string>>
-            {
+            var collection = new List<KeyValuePair<string, string>> {
                 new KeyValuePair<string, string>("setting:0", "1"),
                 new KeyValuePair<string, string>("setting:1", "2")
             };
 
-
-            // Configure the application host.
+            // Act - Configure the application host.
             var processHost = builder
-                .ConfigureAppConfiguration(config =>
-                {
-                    config.AddInMemoryCollection(collection);
-                })
+                .ConfigureAppConfiguration(config => config.AddInMemoryCollection(collection))
                 .AddRetryWaitPolicy<HttpRequestException>(2, 2)
                 .AddHostedProcess<HttpErrorService>()
                 .Build(); // Build the host - this wires up dependencies.
 
             var service = ((AppHost)processHost)._serviceProvider.GetService<HttpErrorService>();
-
             processHost.RunOnce();
 
-            //Thread.Sleep(3000);
-
+            // Assert
             service.CallCount.Should().Be(3);
         }
 
+        /// <summary>Ensure single http client is available to service.</summary>
         [Fact]
         public void Test_ApplicationHost_HttpClientSingle()
         {
+            // Arrange
             var builder = new AppHostBuilder();
 
-            // Configure the application host.
+            // Act - Configure the application host.
             var processHost = builder
                 .AddHealthProbe("884")
                 .AddHttpClient("test", "http://localhost:884")
                 .ConfigureServices((config, logger, serviceBuilder) => serviceBuilder.AddHostedProcess(new SimpleService(new SampleDependency())))
-                .AddHostedProcess<SimpleService1>()
+                .AddHostedProcess<BackgroundTimerService>()
                 .Build();
 
             var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>();
@@ -303,6 +342,7 @@ namespace Cloud.Core.AppHost.Tests
             }
         }
 
+        /// <summary>Ensure multiple http clients are made available to services.</summary>
         [Fact]
         public void Test_ApplicationHost_HttpClientMultiple()
         {
@@ -317,7 +357,7 @@ namespace Cloud.Core.AppHost.Tests
                         { "test2", new Uri("http://test2.com") },
                         { "test3", new Uri("http://test3.com") }
                 })
-                .AddHostedProcess<SimpleService1>()
+                .AddHostedProcess<BackgroundTimerService>()
                 .Build();
 
             var httpClient = ((AppHost)processHost)._serviceProvider.GetService<IHttpClientFactory>();
@@ -335,6 +375,7 @@ namespace Cloud.Core.AppHost.Tests
             }
         }
 
+        /// <summary>Ensure http client is available as a service to the hosted process.</summary>
         [Fact]
         public void Test_ApplicationHost_HttpClientTyped()
         {
@@ -344,7 +385,7 @@ namespace Cloud.Core.AppHost.Tests
             var processHost = builder
                 .AddHealthProbe("885")
                 .AddHttpClientTyped<HttpClientDependencyTest>("test", "http://a.com:885")
-                .AddHostedProcess<SimpleService1>()
+                .AddHostedProcess<BackgroundTimerService>()
                 .Build();
 
             var httpClient = ((AppHost)processHost)._serviceProvider.GetService<HttpClientDependencyTest>();
@@ -357,173 +398,69 @@ namespace Cloud.Core.AppHost.Tests
             catch (Exception)
             {
             }
+
         }
 
+        /// <summary>Ensure startup class is called as expected.</summary>
         [Fact]
         public void Test_ApplicationHost_Startup()
         {
+            // Arrange
             var builder = new AppHostBuilder().CreateDefaultBuilder();
+
+            //Act
             builder.UseStartup<FakeStartup>().Build();
 
-            var instanceBuilder = new AppHostBuilder().CreateDefaultBuilder();
-            instanceBuilder.UseStartup(typeof(FakeStartup)).Build().RunOnce();
+            // Assert
+            builder._startup.GetType().Should().Be(typeof(FakeStartup));
+            ((FakeStartup)builder._startup).Config.Should().NotBeNull();
+            ((FakeStartup)builder._startup).Logger.Should().NotBeNull();
+            ((FakeStartup)builder._startup).Services.Should().NotBeNull();
+            ((FakeStartup)builder._startup).Config.GetChildren().Count().Should().BeGreaterThan(0);
         }
 
+        /// <summary>Ensure error during startup configure app config.</summary>
         [Fact]
         public void Test_ApplicationHost_Startup_ErrorConfigBuild()
         {
+            // Arrange/Act
             var builder = new AppHostBuilder().CreateDefaultBuilder();
+
+            // Assert
             Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupConfig>().Build());
         }
 
+        /// <summary>Ensure error during startup build logger.</summary>
         [Fact]
         public void Test_ApplicationHost_Startup_ErrorLoggingBuild()
         {
+            // Arrange/Act
             var builder = new AppHostBuilder().CreateDefaultBuilder();
+
+            // Assert
             Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupLogging>().Build());
         }
 
+        /// <summary>Ensure error during startup configure services.</summary>
         [Fact]
         public void Test_ApplicationHost_Startup_ErrorServiceBuild()
         {
+            // Arrange/Act
             var builder = new AppHostBuilder().CreateDefaultBuilder();
-            Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupServices>().Build());
+
+            // Assert
+            Assert.Throws<ArgumentException>(() => builder.UseStartup<MalformedStartupConfigureServices>().Build());
         }
 
+        /// <summary>Ensure external IP address is not null.</summary>
         [Fact]
         public void Test_WebClientExtension_GetExternalIPAddress()
         {
-            var externalIP = WebClientExtensions.GetExternalIPAddress();
+            // Arrange/Act
+            var externalIP = WebClientExtensions.GetExternalIpAddress();
+
+            // Assert
             externalIP.Should().NotBe(null);
-        }
-    }
-
-    public class MalformedStartupConfig
-    {
-        public void ConfigureAppConfiguration() { } // will error
-    }
-
-
-    public class MalformedStartupLogging
-    {
-        public void ConfigureAppConfiguration(IConfigurationBuilder builder) { }
-        public void ConfigureLogging() { } // will error
-    }
-
-
-    public class MalformedStartupServices
-    {
-        public void ConfigureAppConfiguration(IConfigurationBuilder builder) { }
-        public void ConfigureLogging(IConfiguration config, ILoggingBuilder builder) { }
-        public void ConfigureServices() { } // will error
-    }
-
-    public class FakeStartup
-    {
-        public void ConfigureAppConfiguration(IConfigurationBuilder builder)
-        {
-            builder.AddInMemoryCollection(new List<KeyValuePair<string, string>>
-            {
-                new KeyValuePair<string, string>("Array:0", "1"),
-                new KeyValuePair<string, string>("Array:1", "2"),
-                new KeyValuePair<string, string>("Array:2", "3")
-            });
-        }
-
-        public void ConfigureLogging(IConfiguration config, ILoggingBuilder builder)
-        {
-            builder.AddConsole();
-            config.GetChildren().Count().Should().BeGreaterThan(0);
-        }
-
-        public void ConfigureServices(IConfiguration config, ILogger logger, IServiceCollection services)
-        {
-            config.GetChildren().Count().Should().BeGreaterThan(0);
-        }
-    }
-
-    internal class SampleDependency
-    {
-        public bool Test()
-        {
-            return true;
-        }
-    }
-
-    internal class SimpleService1 : HttpErrorService
-    {
-        public Action<AppHostContext> StopProcessing;
-        public override void Error(Exception ex, ErrorArgs args) { }
-
-        public override async Task Start(AppHostContext context, CancellationToken cancellationToken)
-        {
-            context.BackgroundTimerTick = (elapsed) =>
-            {
-                Debug.Write(context.IsContinuouslyRunning);
-                Debug.Write(context.ApplicationRunDuration);
-                StopProcessing?.Invoke(context);
-            };
-
-            await Task.FromResult(true);
-        }
-    }
-
-    internal class SimpleService2 : SimpleService1
-    {
-    }
-
-    internal class SimpleService3 : SimpleService2
-    {
-    }
-
-    internal class SimpleService : SimpleService1
-    {
-        public SimpleService(SampleDependency dependency)
-        {
-            dependency.Test().Should().BeTrue();
-        }
-    }
-
-    internal class HttpErrorService : IHostedProcess
-    {
-        public int CallCount = 0;
-        public virtual Task Start(AppHostContext context, CancellationToken cancellationToken)
-        {
-            CallCount++;
-            throw new HttpRequestException();
-        }
-
-        public void Stop() { }
-
-        public virtual void Error(Exception ex, ErrorArgs args)
-        {
-            throw new Exception();
-        }
-    }
-
-    internal class ErrorStopping : IHostedProcess
-    {
-        public void Error(Exception ex, ErrorArgs args) { }
-        public async Task Start(AppHostContext context, CancellationToken cancellationToken) { await Task.FromResult(true); }
-
-        public void Stop()
-        {
-            throw new InvalidOperationException();
-        }
-    }
-
-    public class HttpClientDependencyTest
-    {
-        public readonly HttpClient Client = null;
-        public HttpClientDependencyTest(HttpClient client)
-        {
-            Client = client;
-        }
-
-        public void RetryExample()
-        {
-            var response = Client.GetAsync("doesnotexist").GetAwaiter().GetResult();
-            response.StatusCode.Should().Be(200);
         }
     }
 }

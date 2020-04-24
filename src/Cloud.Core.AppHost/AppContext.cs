@@ -15,6 +15,12 @@
         private readonly Stopwatch _elapsedTime;
         private Timer _monitor;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AppHostContext"/> class.
+        /// </summary>
+        /// <param name="monitorFrequencySeconds">The monitor frequency seconds.</param>
+        /// <param name="systemInfo">The system information.</param>
+        /// <param name="logger">The logger.</param>
         public AppHostContext(int monitorFrequencySeconds, SystemInfo systemInfo, ILogger logger)
         {
             _logger = logger;

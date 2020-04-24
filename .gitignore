@@ -255,3 +255,4 @@ paket-files/
 /src/ConsoleApp2
 /src/ConsoleApp1
 /src/.sonarqube/conf/0
+Cloud.Core*.xml

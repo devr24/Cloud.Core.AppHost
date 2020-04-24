@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
-    <Company>Robert McCabe</Company>
+    <Company>Aylesbury Solutions Ltd</Company>
     <IsPackable>true</IsPackable>
     <PackageId>Cloud.Core.AppHost</PackageId>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -16,6 +16,7 @@
     <Description>Service for hosting process execution in a common way on Windows or Linux (as well as within a container).</Description>
     <RepositoryUrl>https://github.com/rmccabe24/Cloud.Core.AppHost</RepositoryUrl>
     <RepositoryType>Private</RepositoryType>
+    <DocumentationFile>Cloud.Core.AppHost.xml</DocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

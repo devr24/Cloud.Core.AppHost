@@ -89,7 +89,8 @@
         /// </returns>
         public override string ToString()
         {
-            return $"AppInstanceId: {AppInstanceIdentifier.ToString()}, AppName: {AppName}, AppVersion: {AppVersion}, NetVersion: {Version}, OS: {OperationSystem}, CPU: {CpuCount}, Hostname: {Hostname}, Username: {Username}";
+            return $"AppInstanceId: {AppInstanceIdentifier}, AppName: {AppName}, AppVersion: {AppVersion}, NetVersion: {Version}, " +
+                   $"OS: {OperationSystem}, CPU: {CpuCount}, Hostname: {Hostname}, Username: {Username}";
         }
     }
 }
