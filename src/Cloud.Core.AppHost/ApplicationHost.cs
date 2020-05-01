@@ -8,6 +8,7 @@ namespace Cloud.Core.AppHost
     using System.Threading;
     using System.Threading.Tasks;
     using System.Collections.Generic;
+    using Microsoft.Extensions.Hosting;
     using Microsoft.AspNetCore.Hosting;
     using Microsoft.Extensions.Logging;
     using Microsoft.Extensions.DependencyInjection;
@@ -122,11 +123,14 @@ namespace Cloud.Core.AppHost
                     RunHostedProcesses(runOnce);
                 }
                 else
-                    _logger?.LogWarning("Running as service endpoints, processes can only be trigged over http");
-
+                {
+                    _logger?.LogWarning("Running as service endpoints, processes can only be triggered over http");
+                }
 
                 if (!runOnce)
-                    _keepAliveEvent.Wait();
+                {
+                     _keepAliveEvent.Wait();
+                }
             }
             else
             {
@@ -144,35 +148,68 @@ namespace Cloud.Core.AppHost
         /// <param name="runOnce">if set to <c>true</c> [run once].</param>
         private void RunHostedProcesses(bool runOnce)
         {
-            var finishedProcesses = 0;
-            var processTypeCount = _hostedProcessTypes.Count();
-
             foreach (var processType in _hostedProcessTypes)
             {
-                var hostedProcess = _serviceProvider.GetService(processType) as IHostedProcess;
-
                 _logger?.LogInformation($"Starting hosted process {processType.Name}");
 
-                // Run the hosted process, wrapped in polly retry logic.
-                BuildWrappedPolicy().ExecuteAsync(token => hostedProcess?.Start(_context, _cancellation.Token), _cancellation.Token)
-                    .ContinueWith(p =>
-                    {
-                        if (p.IsFaulted || p.Status == TaskStatus.Canceled)
-                        {
-                            _logger?.LogError(p.Exception, $"Error running hosted process {processType.Name} execution {p.Exception?.Message}");
-                            ProcessError(hostedProcess, p.Exception, !runOnce);
-                        }
+                var hostedProcess = _serviceProvider.GetService(processType);
 
-                        finishedProcesses++;
-                    })
-                    .ConfigureAwait(runOnce);
+                Task t = null;
 
+                if (hostedProcess is IHostedProcess process)
+                {
+                    t = StartHostedProcess(runOnce, process, processType.Name);
+                }
+                else if (hostedProcess is IHostedService service)
+                {
+                    t = StartHostedService(service, processType.Name);
+                }
+
+                if (runOnce)
+                {
+                    t?.GetAwaiter().GetResult();
+                }
             }
-            // During run once - we want to ensure all polly retry mechanisms have been executed.  This method will ensure this happens.
-            while (runOnce && finishedProcesses != processTypeCount)
-                Thread.Sleep(500); // wait for retry policies to finish.
         }
 
+        private Task StartHostedProcess(bool runOnce, [NotNull]IHostedProcess process, string name)
+        {
+            // Run the hosted process, wrapped in polly retry logic.
+            return BuildWrappedPolicy().ExecuteAsync(token => process.Start(_context, token), _cancellation.Token)
+                .ContinueWith(async p =>
+                {
+                    if (p.IsFaulted)
+                    {
+                        _logger?.LogError(p.Exception, $"Error running hosted process {name} execution {p.Exception?.Message}");
+                        ProcessError(process, p.Exception, !runOnce);
+                    }
+
+                    if (p.Status == TaskStatus.Canceled)
+                    {
+                        _logger?.LogWarning("Hosted process cancelled");
+                        await process.Stop();
+                    }
+                });
+        }
+
+        private Task StartHostedService([NotNull]IHostedService process, string name)
+        {
+            // Run the hosted process, wrapped in polly retry logic.
+            return BuildWrappedPolicy().ExecuteAndCaptureAsync(process.StartAsync, _cancellation.Token)
+                .ContinueWith(async p =>
+                {
+                    if (p.IsFaulted)
+                    {
+                        _logger?.LogError(p.Exception, $"Error running hosted process {name} execution {p.Exception?.Message}");
+                    }
+
+                    if (p.Status == TaskStatus.Canceled)
+                    {
+                        _logger?.LogWarning("Hosted process cancelled");
+                        await process.StopAsync(_cancellation.Token);
+                    }
+                });
+        }
 
         /// <summary>
         /// Processes stop will call the hosted process's Stop method and waiting for the result.
@@ -193,22 +230,32 @@ namespace Cloud.Core.AppHost
                 {
                     _cancellation.Cancel(true);
 
-                    _logger?.LogWarning("Stopping process host");
-
-                    if (_hostedProcessTypes != null && _hostedProcessTypes.Any())
+                    if (!_usingServiceEndpoints && 
+                        _hostedProcessTypes != null && _hostedProcessTypes.Any())
                     {
                         foreach (Type processType in _hostedProcessTypes.Reverse())
                         {
-                            var hostedProcess = _serviceProvider.GetService(processType) as IHostedProcess;
+                            var hostedProcess = _serviceProvider.GetService(processType);
                             try
                             {
-                                hostedProcess?.Stop();
+                                _logger?.LogWarning($"Stopping {processType.Name}");
+
+                                Task t = null;
+
+                                if (hostedProcess is IHostedProcess process)
+                                {
+                                    t = process.Stop();
+                                }
+                                else if (hostedProcess is IHostedService service)
+                                {
+                                    t = service.StopAsync(_cancellation.Token);
+                                }
+
+                                t?.GetAwaiter().GetResult();
                             }
                             catch (Exception e)
                             {
-                                _logger?.LogError(e,
-                                    $"Error during \"Stop\" execution for {processType.Name}: {e.Message}");
-                                ProcessError(hostedProcess, e);
+                                _logger?.LogError(e, $"Error during \"Stop\" execution for {processType.Name}: {e.Message}");
                             }
                         }
                     }
@@ -257,7 +304,6 @@ namespace Cloud.Core.AppHost
                 {
                     _logger?.LogError(ex,$"Error caught in process error handling for {hostedProcess?.GetType().Name}: {ex.Message}");
                 }
-
 
                 // Don't stop the app if the hosted process decides it does not want that and changes the Continue close arg.
                 if (args.ContinueClose)

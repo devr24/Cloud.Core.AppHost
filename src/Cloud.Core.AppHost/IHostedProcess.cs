@@ -20,7 +20,7 @@ namespace Cloud.Core.AppHost
         /// <summary>
         /// Runs the implementing code.  The cancellation token ensures the implementing code can "ThrowIfCancelled".
         /// </summary>
-        void Stop();
+        Task Stop();
 
         /// <summary>
         /// Error occurred with the specified exception.

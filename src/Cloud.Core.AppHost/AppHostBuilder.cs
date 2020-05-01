@@ -5,6 +5,7 @@
     using System;
     using System.Collections.Generic;
     using System.Net.Http;
+    using System.Reflection;
     using System.Net.Sockets;
     using Microsoft.AspNetCore;
     using Microsoft.AspNetCore.Http;
@@ -13,6 +14,7 @@
     using Microsoft.Extensions.Logging;
     using Microsoft.Extensions.Configuration;
     using Microsoft.Extensions.DependencyInjection;
+    using Microsoft.Extensions.Hosting;
 
     /// <summary>
     /// Extension methods for application _appHost.
@@ -35,7 +37,8 @@
         internal string _link = "<a href='{0}'>{0}</a><br/>";
         internal int _backgroundMonitor = -1;
         internal ILogger _internalLogger;
-        internal object _startup;
+        internal object _startupInstance;
+        internal Type StartupClass = null;
 
         /// <summary>
         /// Gets the configuration.
@@ -207,10 +210,10 @@
         }
 
         /// <summary>
-        /// Adds the _appHosted process.
+        /// Adds the hosted process into the service collection.
         /// </summary>
-        /// <param name="process">The _appHosted process.</param>
-        /// <returns>Application _appHost with a _appHosted process attached.</returns>
+        /// <param name="process">The service to add.</param>
+        /// <returns>AppHostBuilder with the new process added.</returns>
         public AppHostBuilder AddHostedProcess(IHostedProcess process)
         {
             var type = process.GetType();
@@ -221,12 +224,39 @@
         }
 
         /// <summary>
-        /// Adds the _appHosted process.
+        /// Adds the hosted service into the service collection.
         /// </summary>
-        /// <returns>Application _appHost with a _appHosted process attached.</returns>
+        /// <param name="service">The service to add.</param>
+        /// <returns>AppHostBuilder with the new service added.</returns>
+        public AppHostBuilder AddHostedService(IHostedService service)
+        {
+            var type = service.GetType();
+
+            _services.AddSingleton(type, service);
+            _processTypes.Add(type);
+            return this;
+        }
+
+        /// <summary>
+        /// Adds the type of hosted process into the service collection.
+        /// </summary>
+        /// <returns>AppHostBuilder with the new process added.</returns>
         public AppHostBuilder AddHostedProcess<T>() where T : IHostedProcess
         {
             var type = typeof(T);
+            _services.AddSingleton(type);
+            _processTypes.Add(type);
+            return this;
+        }
+
+        /// <summary>
+        /// Adds the type of hosted service into the service collection.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <returns>AppHostBuilder.</returns>
+        public AppHostBuilder AddHostedService<T>() where T : IHostedService
+        {
+            var type = typeof(T);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
             _services.AddSingleton(type);
             _processTypes.Add(type);
             return this;
@@ -309,6 +339,10 @@
             }
 
             _hasBuilt = true;
+
+			// Initialise startup class if used.
+            InitialiseStartup();
+
             _prov = _services.BuildServiceProvider();
             _processTypes.AddRange(ServiceCollectionExtensions.ProcessTypes);
 
@@ -393,16 +427,27 @@
 
                         try
                         {
-                            if (!(_prov.GetService(processType) is IHostedProcess process))
+                            if (_prov.GetService(processType) is IHostedProcess process)
                             {
-                                throw new InvalidOperationException($"Could not find process type {processType.Name}");
+                                await process.Start(_appHost._context, context.RequestAborted);
+                                await process.Stop();
+
+                                context.Response.StatusCode = 200;
+                                await context.Response.WriteAsync($"Start {processType.Name} ran successfully");
+                                return;
+                            }
+                            
+                            if (_prov.GetService(processType) is IHostedService service)
+                            {
+                                await service.StartAsync(context.RequestAborted);
+                                await service.StopAsync(context.RequestAborted);
+                                
+                                context.Response.StatusCode = 200;
+                                await context.Response.WriteAsync($"Start {processType.Name} ran successfully");
+                                return;
                             }
 
-                            await process.Start(_appHost._context, default);
-                            process.Stop();
-
-                            context.Response.StatusCode = 200;
-                            await context.Response.WriteAsync($"Start {processType.Name} ran successfully");
+                            throw new InvalidOperationException($"Could not find process type {processType.Name}");
                         }
                         catch (InvalidOperationException n)
                         {
@@ -443,6 +488,57 @@
                         await context.Response.WriteAsync(string.Format(_link, url + service.Name));
 
                 }));
+        }
+
+        private void InitialiseStartup()
+        {
+            if (StartupClass == null)
+                return;
+
+            var instance = Activator.CreateInstance(StartupClass);
+            _startupInstance = instance;
+
+            try
+            {
+                var configureAppConfiguration = StartupClass.GetMethod("ConfigureAppConfiguration");
+
+                if (configureAppConfiguration != null)
+                    ConfigureAppConfiguration((configuration) => configureAppConfiguration.Invoke(instance, new object[] { configuration }));
+            }
+            catch (Exception ex) when (ex is TargetParameterCountException)
+            {
+                var exMsg = "Could not run ConfigureAppConfiguration method, ensure param (IConfigurationBuilder) has been set in method signature";
+                _internalLogger.LogError(ex, exMsg);
+                throw new ArgumentException(exMsg, ex);
+            }
+
+            try
+            {
+                var configureLogging = StartupClass.GetMethod("ConfigureLogging");
+
+                if (configureLogging != null)
+                    ConfigureLogging((configuration, loggingBuilder) => configureLogging.Invoke(instance, new object[] { configuration, loggingBuilder }));
+            }
+            catch (Exception ex) when (ex is TargetParameterCountException)
+            {
+                var exMsg = "Could not run ConfigureLogging, ensure params (IConfigurationRoot, ILoggingBuilder) have been set in method signature";
+                _internalLogger.LogError(ex, exMsg);
+                throw new ArgumentException(exMsg, ex);
+            }
+
+            try
+            {
+                var configureServices = StartupClass.GetMethod("ConfigureServices");
+
+                if (configureServices != null)
+                    ConfigureServices((configuration, logger, serviceCollection) => configureServices.Invoke(instance, new object[] { configuration, logger, serviceCollection }));
+            }
+            catch (Exception ex) when (ex is TargetParameterCountException)
+            {
+                var exMsg = "Could not run ConfigureServices, ensure params (IConfigurationRoot, ILogger, IServiceCollection) have been set in method signature";
+                _internalLogger.LogError(ex, exMsg);
+                throw new ArgumentException(exMsg, ex);
+            }
         }
     }
 }

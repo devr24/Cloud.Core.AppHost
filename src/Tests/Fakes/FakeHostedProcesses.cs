@@ -122,7 +122,10 @@ namespace Cloud.Core.AppHost.Tests.Fakes
         /// <summary>
         /// Runs the implementing code.  The cancellation token ensures the implementing code can "ThrowIfCancelled".
         /// </summary>
-        public void Stop() { }
+        public Task Stop()
+        {
+            return Task.FromResult(false);
+        }
 
         /// <summary>
         /// Error occurred with the specified exception.
@@ -161,7 +164,7 @@ namespace Cloud.Core.AppHost.Tests.Fakes
         /// Runs the implementing code.  The cancellation token ensures the implementing code can "ThrowIfCancelled".
         /// </summary>
         /// <exception cref="InvalidOperationException"></exception>
-        public void Stop()
+        public Task Stop()
         {
             throw new InvalidOperationException();
         }

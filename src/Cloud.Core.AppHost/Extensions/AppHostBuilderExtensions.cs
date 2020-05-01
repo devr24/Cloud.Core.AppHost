@@ -23,51 +23,7 @@
         /// <returns>The <see cref="T:Microsoft.AspNetCore.Hosting.IWebHostBuilder" />.</returns>
         public static AppHostBuilder UseStartup(this AppHostBuilder hostBuilder, Type startupType)
         {
-            var instance = Activator.CreateInstance(startupType);
-            hostBuilder._startup = instance;
-
-            try
-            {
-                var configureAppConfiguration = startupType.GetMethod("ConfigureAppConfiguration");
-
-                if (configureAppConfiguration != null)
-                    hostBuilder.ConfigureAppConfiguration((configuration) => configureAppConfiguration.Invoke(instance, new object[] { configuration }));
-            }
-            catch (Exception ex) when (ex is TargetParameterCountException)
-            {
-                var exMsg = "Could not run ConfigureAppConfiguration method, ensure param (IConfigurationBuilder) has been set in method signature";
-                hostBuilder._internalLogger.LogError(ex, exMsg);
-                throw new ArgumentException(exMsg, ex);
-            }
-
-            try
-            {
-                var configureLogging = startupType.GetMethod("ConfigureLogging");
-
-                if (configureLogging != null)
-                    hostBuilder.ConfigureLogging((configuration, loggingBuilder) => configureLogging.Invoke(instance, new object[] { configuration, loggingBuilder }));
-            }
-            catch (Exception ex) when (ex is TargetParameterCountException)
-            {
-                var exMsg = "Could not run ConfigureLogging, ensure params (IConfigurationRoot, ILoggingBuilder) have been set in method signature";
-                hostBuilder._internalLogger.LogError(ex, exMsg);
-                throw new ArgumentException(exMsg, ex);
-            }
-
-            try
-            {
-                var configureServices = startupType.GetMethod("ConfigureServices");
-
-                if (configureServices != null)
-                    hostBuilder.ConfigureServices((configuration, logger, serviceCollection) => configureServices.Invoke(instance, new object[] { configuration, logger, serviceCollection }));
-            }
-            catch (Exception ex) when (ex is TargetParameterCountException)
-            {
-                var exMsg = "Could not run ConfigureServices, ensure params (IConfigurationRoot, ILogger, IServiceCollection) have been set in method signature";
-                hostBuilder._internalLogger.LogError(ex, exMsg);
-                throw new ArgumentException(exMsg, ex);
-            }
-
+            hostBuilder.StartupClass = startupType;
             return hostBuilder;
         }
 

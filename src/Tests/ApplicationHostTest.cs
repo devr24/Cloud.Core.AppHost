@@ -1,5 +1,4 @@
 ﻿using System.Net.Http;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Cloud.Core.AppHost.Extensions;
@@ -15,6 +14,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Memory;
 using Microsoft.Extensions.Logging;
 using Cloud.Core.AppHost.Tests.Fakes;
+using Microsoft.Extensions.Hosting;
+using System.Threading;
+using Task = System.Threading.Tasks.Task;
 
 namespace Cloud.Core.AppHost.Tests
 {
@@ -412,11 +414,11 @@ namespace Cloud.Core.AppHost.Tests
             builder.UseStartup<FakeStartup>().Build();
 
             // Assert
-            builder._startup.GetType().Should().Be(typeof(FakeStartup));
-            ((FakeStartup)builder._startup).Config.Should().NotBeNull();
-            ((FakeStartup)builder._startup).Logger.Should().NotBeNull();
-            ((FakeStartup)builder._startup).Services.Should().NotBeNull();
-            ((FakeStartup)builder._startup).Config.GetChildren().Count().Should().BeGreaterThan(0);
+            builder._startupInstance.GetType().Should().Be(typeof(FakeStartup));
+            ((FakeStartup)builder._startupInstance).Config.Should().NotBeNull();
+            ((FakeStartup)builder._startupInstance).Logger.Should().NotBeNull();
+            ((FakeStartup)builder._startupInstance).Services.Should().NotBeNull();
+            ((FakeStartup)builder._startupInstance).Config.GetChildren().Count().Should().BeGreaterThan(0);
         }
 
         /// <summary>Ensure error during startup configure app config.</summary>
@@ -461,6 +463,78 @@ namespace Cloud.Core.AppHost.Tests
 
             // Assert
             externalIP.Should().NotBe(null);
+        }
+
+        [Fact]
+        public void Test_AppHost_IHostedService()
+        {
+            var hostedProcess = new SampleProcess() { Name = "Process1" };
+            var hostedProcess2 = new SampleProcess() { Name = "Process2" };
+            var hostedService = new SampleService() { Name = "Service1" };
+            var hostedService2 = new SampleService() { Name = "Service2" };
+
+            var hostBuilder = new AppHostBuilder().CreateDefaultBuilder();
+            hostBuilder.AddHostedProcess(hostedProcess);
+            hostBuilder.AddHostedProcess(hostedProcess2);
+            hostBuilder.AddHostedProcess<SampleProcess>();
+            hostBuilder.AddHostedService(hostedService);
+            hostBuilder.AddHostedService(hostedService2);
+            hostBuilder.AddHostedService<SampleService>();
+            var host = hostBuilder.Build();
+
+            host.RunOnce();
+
+            //hostedProcess.StartCalls.Should().Be(1);
+            //hostedProcess.StopCalls.Should().Be(1);
+            //hostedProcess.ErrorCalls.Should().Be(1);
+            //hostedService.StartCalls.Should().Be(1);
+            //hostedService.StopCalls.Should().Be(1);
+        }
+
+        private class SampleProcess : IHostedProcess
+        {
+            public string Name { get; set; } = "SampleProcessName1";
+            public int ErrorCalls { get; set; }
+            public int StartCalls { get; set; }
+            public int StopCalls { get; set; }
+
+            public void Error(Exception ex, ErrorArgs args)
+            {
+                ErrorCalls++;
+            }
+
+            public Task Start(AppHostContext context, CancellationToken cancellationToken)
+            {
+                Task.Delay(4000);
+                StartCalls++;
+                return Task.CompletedTask;
+            }
+
+            public Task Stop()
+            {
+                Task.Delay(4000);
+                StopCalls++;
+                return Task.CompletedTask;
+            }
+        }
+
+        private class SampleService : IHostedService
+        {
+            public string Name { get; set; } = "SampleServiceName1";
+            public int StartCalls { get; set; }
+            public int StopCalls { get; set; }
+
+            public Task StartAsync(CancellationToken cancellationToken)
+            {
+                StartCalls++;
+                return Task.CompletedTask;
+            }
+
+            public Task StopAsync(CancellationToken cancellationToken)
+            {
+                StopCalls++;
+                return Task.CompletedTask;
+            }
         }
     }
 }
