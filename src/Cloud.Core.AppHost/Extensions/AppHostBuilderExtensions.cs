@@ -1,8 +1,6 @@
 ﻿namespace Cloud.Core.AppHost.Extensions
 {
     using System;
-    using System.Reflection;
-    using Microsoft.Extensions.Logging;
 
     /// <summary>
     /// Class AppHostBuilder extensions.
