@@ -162,7 +162,7 @@ namespace Cloud.Core.AppHost
                 }
                 else if (hostedProcess is IHostedService service)
                 {
-                    t = StartHostedService(service, processType.Name);
+                    t = StartHostedService(runOnce, service, processType.Name);
                 }
 
                 if (runOnce)
@@ -176,7 +176,7 @@ namespace Cloud.Core.AppHost
         {
             // Run the hosted process, wrapped in polly retry logic.
             return BuildWrappedPolicy().ExecuteAsync(token => process.Start(_context, token), _cancellation.Token)
-                .ContinueWith(async p =>
+                .ContinueWith(p =>
                 {
                     if (p.IsFaulted)
                     {
@@ -187,26 +187,25 @@ namespace Cloud.Core.AppHost
                     if (p.Status == TaskStatus.Canceled)
                     {
                         _logger?.LogWarning("Hosted process cancelled");
-                        await process.Stop();
                     }
                 });
         }
 
-        private Task StartHostedService([NotNull]IHostedService process, string name)
+        private Task StartHostedService(bool runOnce, [NotNull]IHostedService process, string name)
         {
             // Run the hosted process, wrapped in polly retry logic.
             return BuildWrappedPolicy().ExecuteAndCaptureAsync(process.StartAsync, _cancellation.Token)
-                .ContinueWith(async p =>
+                .ContinueWith(p =>
                 {
                     if (p.IsFaulted)
                     {
                         _logger?.LogError(p.Exception, $"Error running hosted process {name} execution {p.Exception?.Message}");
+                        ProcessError(null, p.Exception, !runOnce);
                     }
 
                     if (p.Status == TaskStatus.Canceled)
                     {
                         _logger?.LogWarning("Hosted process cancelled");
-                        await process.StopAsync(_cancellation.Token);
                     }
                 });
         }
