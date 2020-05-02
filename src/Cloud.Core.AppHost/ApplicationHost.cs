@@ -273,6 +273,8 @@ namespace Cloud.Core.AppHost
 
                     if (Status != HostStatus.Faulted)
                         Status = HostStatus.Stopped;
+
+                    _logger?.LogInformation("Exiting app host");
                 }
             }
         }
