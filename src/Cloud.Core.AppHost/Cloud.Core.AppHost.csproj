@@ -10,7 +10,6 @@
     <PackageReleaseNotes />
     <Copyright>Aylesbury Solutions Ltd</Copyright>
     <Version>3.1</Version>
-	<PackageLicenseUrl>https://opensource.org/licenses/MIT</PackageLicenseUrl>
     <PackageIconUrl>https://cloud1core.blob.core.windows.net/icons/CC.png</PackageIconUrl>
     <ProjectGuid>{27EF06EA-0C40-5CF3-3413-A51FB184D690}</ProjectGuid>
     <Authors>Robert McCabe</Authors>
