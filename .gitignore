@@ -256,3 +256,9 @@ paket-files/
 /src/ConsoleApp1
 /src/.sonarqube/conf/0
 Cloud.Core*.xml
+
+# docfx - Api documentation
+docfx_project/
+/logo.svg
+/favicon.ico
+
